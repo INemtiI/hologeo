@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ГОЛОГРАНЬ — симулятор сечений и псевдоголографический дисплей</title>
+<meta name="description" content="Обучающий комплекс для стереометрии: декартова система, сечения по трём точкам, метод следов, измерения, режим голограммы Пеппера.">
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2 22 20H2Z" fill="none" stroke="%235fe6ff" stroke-width="2"/></svg>'>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header>
+  <div class="wrap hrow">
+    <a class="logo" href="#sim">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2.5 21.5 19.5H2.5Z" stroke="#5fe6ff" stroke-width="1.6"/><path d="M9 13.5h6L12 8.5Z" stroke="#ffc24b" stroke-width="1.2"/><path d="M12 2.5v17" stroke="#2e4d7c" stroke-width="1"/></svg>
+      <span><b>ГОЛОГРАНЬ</b><small>СТЕРЕОМЕТРИЯ · 10 КЛАСС</small></span>
+    </a>
+    <nav>
+      <a href="#sim">СИМУЛЯТОР</a><a href="#tasks">ЗАДАЧИ</a><a href="#holo">ГОЛОГРАММА</a><a href="#plan">ПЛАН</a><a href="#start">СТАРТ</a>
+    </nav>
+    <button class="btn pri sm" id="holoOpen">▶ Голограмма</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- intro + simulator -->
+  <section id="sim">
+    <div class="intro">
+      <div class="row">
+        <span class="chip">MVP v0.2</span>
+        <span class="chip dim">программный прототип · этап 2</span>
+        <span class="chip amb">эффект Пеппера</span>
+      </div>
+      <h1>Сечения, которые <em>видно в объёме</em>, а не на плоском чертеже</h1>
+      <p class="lead">Тело в декартовой системе координат, честное построение сечения по шагам, измерения длин и площадей — и вывод на псевдоголографическую пирамиду.</p>
+      <div class="feat">
+        <span class="chip dim">декартова система</span>
+        <span class="chip dim">8 тел</span>
+        <span class="chip dim">координаты точек</span>
+        <span class="chip dim">длины · площади · объём</span>
+        <span class="chip dim">выделение и покраска</span>
+        <span class="chip dim">продление прямых</span>
+        <span class="chip dim">метод следов · 4 шага</span>
+        <span class="chip dim">4 проекции под пирамиду</span>
+      </div>
+
+      <div class="console">
+        <div class="console-left">
+          <div class="viewport rev" id="viewport">
+            <i class="ck tl"></i><i class="ck tr"></i><i class="ck bl"></i><i class="ck br"></i>
+            <div class="toolbar">
+              <button class="tbtn" data-v="iso">ИЗО</button>
+              <button class="tbtn" data-v="front">СПЕРЕДИ</button>
+              <button class="tbtn" data-v="top">СВЕРХУ</button>
+              <button class="tbtn" data-v="left">СЛЕВА</button>
+              <button class="tbtn" data-v="reset" title="Сброс вида">⟲</button>
+            </div>
+            <canvas id="viewCv"></canvas>
+            <div class="tip" id="tip"></div>
+            <span class="vp-hint">КЛИК — ВЫДЕЛЕНИЕ · ТЯНИ — ВРАЩЕНИЕ · КОЛЕСО / ПИНЧ — МАСШТАБ · ESC — СБРОС ВЫДЕЛЕНИЯ</span>
+          </div>
+
+          <div class="inspector rev">
+            <div class="cell"><h4>// Тело</h4><div id="mFig"></div></div>
+            <div class="cell"><h4>// Выделено</h4><div id="mSel"><span class="dim">кликни по вершине, ребру или грани</span></div></div>
+            <div class="cell"><h4>// Сечение</h4><div id="mSec">—</div></div>
+          </div>
+        </div>
+
+        <aside class="panel rev">
+          <h4>// Тело</h4>
+          <div class="fgrid" id="fGrid"></div>
+
+          <h4>// Отображение</h4>
+          <label class="tgl"><input type="checkbox" id="cbGrid" checked><span>Оси и сетка координат</span></label>
+          <label class="tgl"><input type="checkbox" id="cbSec" checked><span>Показывать сечение</span></label>
+          <label class="tgl"><input type="checkbox" id="cbVtx" checked><span>Вершины и подписи</span></label>
+          <label class="tgl"><input type="checkbox" id="cbAuto" checked><span>Автовращение</span></label>
+          <label class="tgl"><input type="checkbox" id="cbSteps"><span><b style="color:var(--am)">По шагам</b>&nbsp;(метод следов)</span></label>
+
+          <div style="margin-top:14px"><h4>// Точки сечения</h4></div>
+          <div id="ptRows"></div>
+
+          <div class="stepsbar" id="stepsBar">
+            <div class="st-row">
+              <button id="stPrev">◀</button>
+              <div class="st-dots" id="stDots"><i></i><i></i><i></i><i></i></div>
+              <button id="stNext">▶</button>
+            </div>
+            <p id="stTxt"></p>
+          </div>
+
+          <div style="margin-top:14px"><h4>// Внешний вид</h4></div>
+          <div class="style-row">
+            <input type="color" id="colIn" value="#ffc24b">
+            <input type="range" id="alpIn" min="5" max="90" value="35" style="flex:1">
+            <span class="alp-val" id="alpVal">35%</span>
+          </div>
+          <div class="btnrow">
+            <button class="btn sm" id="btnFace" disabled>Покрасить грань</button>
+            <button class="btn sm" id="btnBody">Покрасить тело</button>
+          </div>
+          <div class="btnrow">
+            <button class="btn sm" id="btnExtEdge" disabled>∞ Продлить ребро</button>
+            <button class="btn sm" id="btnExtSec">∞ Сторы сечения</button>
+            <button class="btn sm" id="btnClear">✕ Сброс</button>
+          </div>
+
+          <div class="btnrow" style="margin-top:16px">
+            <button class="btn sm" id="holoOpen2">◮ В пирамиду</button>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pains">
+        <div class="pain rev"><b>ПРОБЛЕМА 01</b><p>Ученик видит плоский чертёж и не может «достроить» объёмную фигуру в голове.</p></div>
+        <div class="pain rev"><b>ПРОБЛЕМА 02</b><p>Сечение строится цепочкой: одна ошибка в начале ломает всё построение.</p></div>
+        <div class="pain rev"><b>ПРОБЛЕМА 03</b><p>На доске — 2–3 примера. Здесь — десятки сечений одной фигуры под любыми углами.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- tasks -->
+  <section id="tasks" class="sec">
+    <div class="sec-head rev"><span class="idx">02</span><h2>Библиотека задач</h2><span class="rule"></span></div>
+    <p class="sec-sub rev">Типовые формулировки ЕГЭ и базовой стереометрии. Клик — и условие загружено в симулятор: двигай точки, смотри шаги, выделяй и измеряй.</p>
+    <div class="tgrid" id="taskGrid"></div>
+  </section>
+
+  <!-- hologram -->
+  <section id="holo" class="sec">
+    <div class="sec-head rev"><span class="idx">03</span><h2>Псевдоголограмма · эффект Пеппера</h2><span class="rule"></span></div>
+    <div class="holo-grid">
+      <div class="prose rev">
+        <p><b>Как это работает.</b> Полупрозрачная грань стоит на экране под углом 45°. Свет от картинки на экране отражается в глаза наблюдателю, а мозг «продолжает» луч по прямой — и изображение оказывается висящим в центре пирамиды.</p>
+        <p><b>Зачем четыре проекции.</b> У усечённой пирамиды четыре грани. Каждая отражает свой квадрант экрана, поэтому все зрители вокруг видят одно и то же «парящее» тело — можно обойти и рассмотреть сечение с любой стороны. Именно это и нужно на уроке.</p>
+        <p>Режим «Голограмма» уже раскладывает картинку на четыре квадранта с правильной ориентацией — остаётся поставить пирамиду узким основанием в центр экрана и выключить верхний свет.</p>
+        <div class="diagram">
+          <svg viewBox="0 0 520 300" width="100%">
+            <line x1="40" y1="242" x2="480" y2="242" stroke="#5fe6ff" stroke-width="2"/>
+            <text x="44" y="262" font-family="JetBrains Mono,monospace" font-size="10" fill="#8ba3c4">ЭКРАН (ПЛАНШЕТ / ТЕЛЕФОН)</text>
+            <path d="M180 242 L340 242 L280 182 L240 182 Z" fill="rgba(95,230,255,.07)" stroke="#5fe6ff" stroke-width="1.4"/>
+            <path d="M340 242 L280 182" stroke="#9df2ff" stroke-width="1.6"/>
+            <path d="M336 242 A 20 20 0 0 0 326 227" fill="none" stroke="#ffc24b" stroke-width="1.2"/>
+            <text x="308" y="236" font-family="JetBrains Mono,monospace" font-size="10" fill="#ffc24b">45°</text>
+            <rect x="243" y="246" width="14" height="12" fill="none" stroke="#ffc24b" stroke-width="1.4"/>
+            <text x="215" y="272" font-family="JetBrains Mono,monospace" font-size="9" fill="#8ba3c4">ОБЪЕКТ НА ЭКРАНЕ</text>
+            <line class="ray" x1="252" y1="248" x2="304" y2="216" stroke="#ffc24b" stroke-width="1.6"/>
+            <line class="ray" x1="304" y1="216" x2="420" y2="140" stroke="#ffc24b" stroke-width="1.6"/>
+            <line x1="304" y1="216" x2="262" y2="140" stroke="#5fe6ff" stroke-width="1" stroke-dasharray="3 5" opacity=".7"/>
+            <g class="ghostimg">
+              <path d="M262 118 L284 152 L240 152 Z" fill="rgba(95,230,255,.12)" stroke="#9df2ff" stroke-width="1.4" stroke-dasharray="5 4"/>
+              <text x="290" y="126" font-family="JetBrains Mono,monospace" font-size="10" fill="#9df2ff">МНИМОЕ ИЗОБРАЖЕНИЕ</text>
+            </g>
+            <circle cx="428" cy="134" r="9" fill="none" stroke="#8ba3c4" stroke-width="1.4"/>
+            <circle cx="428" cy="134" r="3" fill="#8ba3c4"/>
+            <text x="400" y="118" font-family="JetBrains Mono,monospace" font-size="10" fill="#8ba3c4">ГЛАЗ</text>
+          </svg>
+        </div>
+      </div>
+
+      <aside class="panel rev">
+        <h4>// Пирамида своими руками</h4>
+        <p class="calc-note">Грань должна стоять под 45° — тогда высота трапеции жёстко связана с основаниями: <span class="mono" style="color:var(--am)">h = (a − b) / 2</span></p>
+        <div class="calc-row">
+          <div><label>НИЗ a, ММ</label><input type="number" id="inA" value="170" min="40" max="600"></div>
+          <div><label>ВЕРХ b, ММ</label><input type="number" id="inB" value="50" min="10" max="300"></div>
+        </div>
+        <div class="out-row"><span>Высота пирамиды h</span><b id="outH">—</b></div>
+        <div class="out-row"><span>Боковая грань L (вырезать)</span><b id="outL">—</b></div>
+        <div class="out-row"><span>Нужен экран, сторона ≈ a</span><b id="outS">—</b></div>
+        <svg id="pyrPrev" viewBox="0 0 300 180"></svg>
+        <div class="btnrow">
+          <button class="btn pri sm" id="dlTpl">⤓ Скачать шаблон SVG</button>
+          <button class="btn sm" id="holoOpen3">▶ Проверить в пирамиде</button>
+        </div>
+        <p class="note">Материал: ПЭТ, оргстекло, крышка от упаковки. Гладкой стороной внутрь, стыки — прозрачный скотч. Комнату затемнить, яркость экрана на максимум.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- plan -->
+  <section id="plan" class="sec">
+    <div class="sec-head rev"><span class="idx">04</span><h2>План реализации</h2><span class="rule"></span></div>
+    <div class="rev">
+      <div class="stage"><div class="num">1</div><div><h3>Исследование</h3><p>Анализ аналогов (GeoGebra 3D, готовые голопирамиды), точный список функций, выбор стека.</p></div><span class="status wip">в работе</span></div>
+      <div class="stage"><div class="num">2</div><div><h3>Программный прототип</h3><p>Многогранники и тела вращения, система координат, сечения, метод следов, измерения.</p></div><span class="status now">этот сайт</span></div>
+      <div class="stage"><div class="num">3</div><div><h3>Аппаратная часть</h3><p>Расчёт геометрии пирамиды под конкретный экран, изготовление, тест яркости и контраста.</p></div><span class="status next">следующий шаг</span></div>
+      <div class="stage"><div class="num">4</div><div><h3>Интеграция</h3><p>Вывод 4 проекций под грани, библиотека задач и сценариев показа на уроке.</p></div><span class="status wip">частично готово</span></div>
+      <div class="stage"><div class="num">5</div><div><h3>Апробация</h3><p>Эксперимент на одноклассниках: сравнение с контрольной группой, метрики времени и правильности.</p></div><span class="status later">план</span></div>
+      <div class="stage"><div class="num">6</div><div><h3>Оформление и презентация</h3><p>Отчёт, видео работы прибора, адаптация акцентов под секцию конференции.</p></div><span class="status later">план</span></div>
+    </div>
+    <div class="mvp-banner rev">
+      <b>ВАРИАНТ A · МИНИМАЛЬНЫЙ MVP</b>
+      <p>Смартфон или планшет + пирамида из ПЭТ + эта веб-страница. Быстро, дёшево, идеально для педагогического эксперимента — показать можно уже на этой неделе.</p>
+    </div>
+  </section>
+
+  <!-- start -->
+  <section id="start" class="sec">
+    <div class="sec-head rev"><span class="idx">05</span><h2>С чего начать</h2><span class="rule"></span></div>
+    <div class="start-grid">
+      <div class="panel rev">
+        <h4>// Чек-лист первых шагов · <span id="progTxt">0 / 5</span></h4>
+        <div class="prog-wrap"><div id="progBar"></div></div>
+        <div id="todoList">
+          <label class="todo"><input type="checkbox"><span class="box"></span><span class="tt"><b>Сегодня:</b> склеить пирамиду из ПЭТ/CD-бокса (трапеции под 45°) и проверить эффект на любом голо-видео.</span></label>
+          <label class="todo"><input type="checkbox"><span class="box"></span><span class="tt">Рассчитать размеры своей пирамиды в калькуляторе выше (лучше экран от 7–8″) и скачать шаблон.</span></label>
+          <label class="todo"><input type="checkbox"><span class="box"></span><span class="tt">Прогнать 3–4 задачи из библиотеки и показать построения учителю математики — зафиксировать замечания.</span></label>
+          <label class="todo"><input type="checkbox"><span class="box"></span><span class="tt">Запустить режим «Голограмма» под своей пирамидой, снять видео в темноте — оно пойдёт в отчёт.</span></label>
+          <label class="todo"><input type="checkbox"><span class="box"></span><span class="tt">Показать прототип 5 одноклассникам, записать их вопросы — это список доработок для этапа 3.</span></label>
+        </div>
+      </div>
+      <div class="panel rev">
+        <h4>// Что измерять на апробации (этап 5)</h4>
+        <ul class="metrics">
+          <li>Время решения задачи на построение сечения</li>
+          <li>Число ошибок в построении (эксперимент vs контрольная группа)</li>
+          <li>Короткий тест «до» и «после» на пространственное распознавание</li>
+          <li>Субъективная сложность: шкала 1–5 после каждой задачи</li>
+          <li>Фото/видео фиксации для отчёта</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>ГОЛОГРАНЬ · учебный проект · стереометрия · прототип к этапам 2–4 плана · файлы: index.html + css/ + js/</p>
+    <div><a href="#sim">симулятор</a><a href="#tasks">задачи</a><a href="#holo">голограмма</a><a href="#plan">план</a></div>
+  </div>
+</footer>
+
+<!-- hologram overlay -->
+<div id="holoOv">
+  <div class="bar">
+    <select id="holoFig"></select>
+    <label><input type="checkbox" id="holoMir"> зеркало</label>
+    <button id="holoClose">✕ ЗАКРЫТЬ (ESC)</button>
+  </div>
+  <canvas id="holoCv"></canvas>
+  <p id="holoHint">Затемни комнату · поставь пирамиду узким квадратом в центр · яркость на максимум</p>
+</div>
+
+<script src="js/vec.js"></script>
+<script src="js/figures.js"></script>
+<script src="js/section.js"></script>
+<script src="js/render.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
