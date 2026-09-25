@@ -1,6 +1,6 @@
 :root{
   --bg:#081120; --panel:#0d1a2e; --panel2:#0b1626; --line:#1f3455; --line2:#2e4d7c;
-  --ink:#e7effb; --mut:#8ba3c4; --cy:#5fe6ff; --am:#ffc24b; --gr:#69f0a0;
+  --ink:#e7effb; --mut:#8ba3c4; --cy:#5fe6ff; --am:#2dd4bf; --gr:#69f0a0;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -52,7 +52,7 @@ nav a:hover{color:var(--ink)} nav a:hover::after{width:100%}
 .btn.sm{padding:7px 12px;font-size:10px}
 .btn:disabled{opacity:.35;pointer-events:none}
 .chip{font:600 10px "JetBrains Mono";letter-spacing:.1em;text-transform:uppercase;color:var(--cy);border:1px solid rgba(95,230,255,.35);padding:4px 9px;border-radius:2px}
-.chip.amb{color:var(--am);border-color:rgba(255,194,75,.4)}
+.chip.amb{color:var(--am);border-color:rgba(45,212,191,.4)}
 .chip.dim{color:var(--mut);border-color:var(--line)}
 
 /* ---------- intro ---------- */
@@ -139,7 +139,7 @@ input[type=color]{width:46px;height:30px;border:1px solid var(--line2);backgroun
 .st-row button:disabled{opacity:.3;cursor:default}
 .st-dots{display:flex;gap:7px;flex:1;justify-content:center}
 .st-dots i{width:22px;height:4px;background:var(--line);border-radius:2px;transition:.25s}
-.st-dots i.on{background:var(--am);box-shadow:0 0 8px rgba(255,194,75,.5)}
+.st-dots i.on{background:var(--am);box-shadow:0 0 8px rgba(45,212,191,.5)}
 #stTxt{font-size:13px;color:var(--ink);min-height:40px}
 #stTxt::before{content:"▸ ";color:var(--am)}
 
@@ -203,7 +203,7 @@ input[type=color]{width:46px;height:30px;border:1px solid var(--line2);backgroun
 .stage p{color:var(--mut);font-size:13.5px;max-width:640px}
 .status{align-self:center;font:600 10px "JetBrains Mono";letter-spacing:.1em;text-transform:uppercase;padding:5px 10px;border-radius:2px;white-space:nowrap}
 .status.now{color:#06131f;background:var(--cy)}
-.status.wip{color:var(--am);border:1px solid rgba(255,194,75,.45)}
+.status.wip{color:var(--am);border:1px solid rgba(45,212,191,.45)}
 .status.next{color:var(--gr);border:1px solid rgba(105,240,160,.4)}
 .status.later{color:var(--mut);border:1px solid var(--line)}
 .mvp-banner{
@@ -219,10 +219,10 @@ input[type=color]{width:46px;height:30px;border:1px solid var(--line2);backgroun
 .prog-wrap{height:6px;background:var(--line);border-radius:3px;margin:6px 0 18px;overflow:hidden}
 #progBar{height:100%;width:0;background:linear-gradient(90deg,var(--am),var(--cy));transition:width .4s;box-shadow:0 0 10px rgba(95,230,255,.5)}
 .todo{display:flex;gap:13px;align-items:flex-start;padding:12px 4px;border-top:1px dashed var(--line);cursor:pointer;user-select:none;transition:.15s}
-.todo:hover{background:rgba(255,194,75,.04)}
+.todo:hover{background:rgba(45,212,191,.04)}
 .todo input{display:none}
 .todo .box{width:18px;height:18px;border:1px solid var(--line2);border-radius:3px;flex:none;margin-top:2px;position:relative;transition:.18s}
-.todo input:checked+.box{background:var(--am);border-color:var(--am);box-shadow:0 0 10px rgba(255,194,75,.45)}
+.todo input:checked+.box{background:var(--am);border-color:var(--am);box-shadow:0 0 10px rgba(45,212,191,.45)}
 .todo input:checked+.box::after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;font:700 12px sans-serif;color:#1d1502}
 .todo .tt{font-size:14.5px;transition:.2s}
 .todo input:checked~.tt{color:var(--mut);text-decoration:line-through}
@@ -423,7 +423,7 @@ body.stage-is-fullscreen{overflow:hidden}
 .angle-value{min-height:30px;margin-top:9px;padding:8px 10px;border:1px dashed var(--line2);background:rgba(95,230,255,.035);font:500 11px "JetBrains Mono";color:var(--cy)}
 .angle-value b{display:block;color:var(--am);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}
 .angle-value strong{font-size:19px;color:var(--cy);font-weight:600}
-.btn.on{border-color:var(--am);color:var(--am);background:rgba(255,194,75,.08);box-shadow:0 0 14px rgba(255,194,75,.15)}
+.btn.on{border-color:var(--am);color:var(--am);background:rgba(45,212,191,.08);box-shadow:0 0 14px rgba(45,212,191,.15)}
 .room-row{display:flex;gap:6px;align-items:center;margin-top:9px;flex-wrap:wrap}
 .room-row .btn{flex:1;justify-content:center;min-width:112px}
 .room-join-row{flex-wrap:nowrap}

@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 
 const S={
   fig:null,taskIndex:0,curPts:[],pts3:[],plane:null,trace:null,sec:{poly:[],raw:[],name:'—'},
-  yaw:0,pitch:Math.PI/2,zoom:1,autoRot:true,
+  yaw:0,pitch:-1.08,zoom:1,autoRot:true,
   stepsOn:false,step:1,stepAnim:1,
   showSec:true,showVtx:true,showGrid:true,
   sel:null,anglePicks:[],angleMode:false,
@@ -201,7 +201,7 @@ $('#taskGrid').addEventListener('click',e=>{
 addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
   if(e.key==='Escape'){S.sel=null;hideEntityMenu();updInspector();closeHolo();}
-  if(e.key==='r'||e.key==='к'){S.yaw=0;S.pitch=Math.PI/2;S.zoom=1;scheduleSceneState();}
+  if(e.key==='r'||e.key==='к'){S.yaw=0;S.pitch=-1.08;S.zoom=1;scheduleSceneState();}
   if(e.key==='g'||e.key==='п'){S.showGrid=!S.showGrid;$('#cbGrid').checked=S.showGrid;scheduleSceneState();}
 });
 
@@ -232,7 +232,7 @@ viewCv.addEventListener('pointermove',e=>{
     const dx=e.clientX-lx,dy=e.clientY-ly;
     moved+=Math.abs(dx)+Math.abs(dy);
     S.yaw+=dx*0.006;
-    S.pitch=clamp(S.pitch-dy*0.005,-0.15,1.56);
+    S.pitch=clamp(S.pitch-dy*0.005,-1.56,1.56);
     lx=e.clientX;ly=e.clientY;
     scheduleSceneState();
   }else hoverAt(e);
@@ -608,11 +608,11 @@ function calcPyr(){
   $('#pyrPrev').innerHTML=
     `<path d="M${p.map(q=>q.join(',')).join(' L ')} Z" fill="rgba(95,230,255,.08)" stroke="#5fe6ff" stroke-width="1.4"/>`+
     `<line x1="${cx2-a*sc/2}" y1="164" x2="${cx2+a*sc/2}" y2="164" stroke="#8ba3c4" stroke-width="1"/>`+
-    `<text x="${cx2-14}" y="176" font-family="JetBrains Mono" font-size="10" fill="#ffc24b">a=${a}</text>`+
+    `<text x="${cx2-14}" y="176" font-family="JetBrains Mono" font-size="10" fill="#2dd4bf">a=${a}</text>`+
     `<line x1="${cx2+b*sc/2}" y1="${y0-h*sc}" x2="${cx2-b*sc/2}" y2="${y0-h*sc}" stroke="#8ba3c4" stroke-width="1"/>`+
-    `<text x="${cx2-12}" y="${y0-h*sc-6}" font-family="JetBrains Mono" font-size="10" fill="#ffc24b">b=${b}</text>`+
+    `<text x="${cx2-12}" y="${y0-h*sc-6}" font-family="JetBrains Mono" font-size="10" fill="#2dd4bf">b=${b}</text>`+
     `<line x1="${cx2+a*sc/2+14}" y1="${y0}" x2="${cx2+a*sc/2+14}" y2="${y0-h*sc}" stroke="#8ba3c4" stroke-width="1"/>`+
-    `<text x="${cx2+a*sc/2+19}" y="${y0-h*sc/2}" font-family="JetBrains Mono" font-size="10" fill="#ffc24b">h=${Math.round(h)}</text>`+
+    `<text x="${cx2+a*sc/2+19}" y="${y0-h*sc/2}" font-family="JetBrains Mono" font-size="10" fill="#2dd4bf">h=${Math.round(h)}</text>`+
     `<text x="12" y="20" font-family="JetBrains Mono" font-size="10" fill="#5fe6ff">ГРАНЬ · УГОЛ 45°</text>`;
 }
 $('#inA').oninput=calcPyr;$('#inB').oninput=calcPyr;
