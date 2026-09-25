@@ -25,10 +25,31 @@ const entityMenuBody=$('#entityMenuBody');
 const dpr=Math.min(window.devicePixelRatio||1,2);
 
 /* ---------- общий экран: ведущий управляет, подключённое устройство отображает ---------- */
-const SYNC={peer:null,conn:null,role:null,room:'',applying:false,lastSent:0};
+/* Связь — WebRTC через PeerJS (библиотека локальная, см. js/vendor). Сигнальный сервер по
+   умолчанию — облако 0.peerjs.com. Если он недоступен из вашей сети, можно указать свой
+   PeerServer параметрами ссылки: ?peerHost=хост&peerPort=порт&peerPath=путь&peerKey=ключ   */
+const SYNC={peer:null,conns:new Set(),role:null,room:'',applying:false,lastSent:0,
+            leaving:false,retries:0,rejoinTimer:0,joinTimer:0};
 function roomStatus(text,kind=''){
   const el=$('#roomStatus');
   if(el){el.textContent=text;el.className='room-status '+kind;}
+  const chip=$('#displayChip');
+  if(chip){chip.textContent=text;chip.dataset.kind=kind;}
+}
+function openConnCount(){
+  let n=0;
+  for(const c of SYNC.conns)if(c.open)n++;
+  return n;
+}
+function peerServerOptions(){
+  const q=new URLSearchParams(location.search);
+  const host=q.get('peerHost');
+  if(!host)return undefined; /* облако PeerJS по умолчанию */
+  const opts={host,path:q.get('peerPath')||'/'};
+  if(q.get('peerPort'))opts.port=+q.get('peerPort');
+  opts.secure=q.get('peerSecure')?q.get('peerSecure')!=='0':location.protocol==='https:';
+  if(q.get('peerKey'))opts.key=q.get('peerKey');
+  return opts;
 }
 function sceneState(){
   return{
@@ -37,15 +58,20 @@ function sceneState(){
     showSec:S.showSec,showVtx:S.showVtx,showGrid:S.showGrid,
     stepsOn:S.stepsOn,step:S.step,stepAnim:S.stepAnim,
     bodyStyle:S.bodyStyle,faceStyle:S.faceStyle,
-    extEdges:[...S.extEdges],extSection:S.extSection
+    extEdges:[...S.extEdges],extSection:S.extSection,
+    holo:$('#holoOv').classList.contains('on'),holoMir:$('#holoMir').checked
   };
 }
 function sendSceneState(force=false){
-  if(SYNC.role!=='host'||!SYNC.conn||!SYNC.conn.open||SYNC.applying)return;
+  if(SYNC.role!=='host'||SYNC.applying||!SYNC.conns.size)return;
   const now=performance.now();
   if(!force&&now-SYNC.lastSent<70)return;
-  SYNC.lastSent=now;
-  SYNC.conn.send(sceneState());
+  const state=sceneState();let sent=false;
+  for(const c of SYNC.conns){
+    if(!c.open)continue;
+    try{c.send(state);sent=true;}catch(err){}
+  }
+  if(sent)SYNC.lastSent=now;
 }
 function scheduleSceneState(){sendSceneState();}
 function setRoomUi(active){
@@ -435,6 +461,7 @@ const roomAlphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function randomRoomCode(){
   return Array.from({length:6},()=>roomAlphabet[Math.floor(Math.random()*roomAlphabet.length)]).join('');
 }
+function normalizeRoomCode(v){return (v||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');}
 function roomLink(){
   const url=new URL(location.href);
   url.searchParams.set('room',SYNC.room);
@@ -444,69 +471,195 @@ function roomLink(){
 }
 function drawRoomQr(){
   const qr=$('#roomQr');
-  if(!SYNC.room){qr.hidden=true;return;}
-  qr.hidden=false;
-  if(window.QRCode&&QRCode.toCanvas){
-    QRCode.toCanvas(qr,roomLink(),{width:156,margin:1,color:{dark:'#081120',light:'#dffaff'}},err=>{
-      if(err){qr.hidden=true;roomStatus('QR-код не удалось построить, используйте код.','error');}
-    });
-  }else{
-    qr.hidden=true;
-    roomStatus('QR-библиотека недоступна — используйте код комнаты.','error');
+  if(!SYNC.room||SYNC.role!=='host'){qr.hidden=true;return;}
+  if(!window.qrcode){qr.hidden=true;return;}
+  try{
+    const m=window.qrcode(0,'M');
+    m.addData(roomLink());m.make();
+    const n=m.getModuleCount(),pad=2,total=n+pad*2;
+    const px=Math.max(2,Math.floor(156/total));
+    qr.width=px*total;qr.height=px*total;
+    const ctx=qr.getContext('2d');
+    ctx.fillStyle='#dffaff';ctx.fillRect(0,0,qr.width,qr.height);
+    ctx.fillStyle='#081120';
+    for(let r=0;r<n;r++)for(let c=0;c<n;c++){
+      if(m.isDark(r,c))ctx.fillRect((c+pad)*px,(r+pad)*px,px,px);
+    }
+    qr.hidden=false;
+  }catch(err){qr.hidden=true;}
+}
+/* Пределы, в которых «Общий экран» вообще может работать в этом браузере. */
+function roomSupportError(){
+  if(!window.Peer)return 'Библиотека связи не загрузилась — обновите страницу.';
+  if(location.protocol==='file:')return 'Файл открыт с диска — браузер блокирует WebRTC. Откройте сайт по ссылке (через HTTPS).';
+  if(typeof RTCPeerConnection==='undefined')return 'Браузер заблокировал WebRTC: страницу нужно открыть по HTTPS или через localhost.';
+  return null;
+}
+function closeRoom(silent=false){
+  SYNC.leaving=true;
+  clearTimeout(SYNC.rejoinTimer);clearTimeout(SYNC.joinTimer);
+  for(const c of SYNC.conns){try{c.close();}catch(err){}}
+  SYNC.conns.clear();
+  if(SYNC.peer){try{SYNC.peer.destroy();}catch(err){}SYNC.peer=null;}
+  SYNC.role=null;SYNC.room='';SYNC.retries=0;
+  $('#roomQr').hidden=true;setRoomUi(false);
+  if(!silent)roomStatus('Комната не создана');
+}
+function roomErrorText(err){
+  const t=err&&err.type;
+  switch(t){
+    case 'unavailable-id':return 'Код уже занят — создайте комнату ещё раз.';
+    case 'peer-unavailable':return 'Комната не найдена. Проверьте код: у ведущего комната должна быть открыта.';
+    case 'network':return 'Нет связи с сервером синхронизации. Проверьте интернет и попробуйте ещё раз.';
+    case 'server-error':
+    case 'socket-error':
+    case 'socket-closed':
+      return 'Сервер синхронизации недоступен. Повторите позже или укажите свой PeerServer (?peerHost=…) в ссылке.';
+    case 'browser-incompatible':return 'Браузер не поддерживает WebRTC. Откройте страницу по HTTPS в современном браузере.';
+    case 'ssl-unavailable':return 'Выбранный сервер недоступен по HTTPS. Укажите другой сервер (?peerHost=…).';
+    case 'disconnected':return 'Связь с сервером потеряна — пробуем переподключиться…';
+    default:return 'Не удалось подключить общий экран'+(t?' ('+t+').':'.');
   }
 }
-function closeRoom(){
-  if(SYNC.conn){try{SYNC.conn.close();}catch(err){}SYNC.conn=null;}
-  if(SYNC.peer){try{SYNC.peer.destroy();}catch(err){}SYNC.peer=null;}
-  SYNC.role=null;SYNC.room='';
-  $('#roomQr').hidden=true;setRoomUi(false);
-  roomStatus('Комната не создана');
-}
 function handleRoomError(err){
-  const msg=err&&err.type==='unavailable-id'?'Код уже занят — создайте комнату ещё раз.':'Не удалось подключить общий экран.';
-  roomStatus(msg,'error');
+  if(SYNC.leaving)return;
+  roomStatus(roomErrorText(err),'error');
 }
 function bindRoomConnection(conn,role){
-  SYNC.conn=conn;
+  SYNC.conns.add(conn);
   conn.on('open',()=>{
+    clearTimeout(SYNC.joinTimer);
+    SYNC.retries=0;
     if(role==='host'){
-      roomStatus('Дисплей подключён · изображение синхронизируется.','ready');
+      roomStatus('Дисплеев подключено: '+openConnCount()+' · изображение синхронизируется.','ready');
       sendSceneState(true);
     }else{
-      roomStatus('Подключено · это устройство только отображает сцену.','ready');
+      roomStatus('Подключено · устройство повторяет сцену ведущего.','ready');
+      requestDisplayFullscreen();
     }
   });
   conn.on('data',data=>{
     if(role==='viewer'&&data&&data.type==='scene-state')applySceneState(data);
   });
   conn.on('close',()=>{
-    SYNC.conn=null;
-    roomStatus(role==='host'?'Ожидание дисплея…':'Связь закрыта.','');
+    SYNC.conns.delete(conn);
+    if(SYNC.leaving)return;
+    if(role==='host'){
+      const n=openConnCount();
+      roomStatus(n?'Дисплеев подключено: '+n+' · изображение синхронизируется.':'Ожидание дисплея…','ready');
+    }else scheduleRejoin();
   });
-  conn.on('error',handleRoomError);
+  conn.on('error',err=>{
+    if(SYNC.leaving)return;
+    if(err&&err.type==='peer-unavailable')scheduleRejoin();
+    else handleRoomError(err);
+  });
 }
-function createRoom(){
-  closeRoom();
-  if(!window.Peer){roomStatus('Сервис связи не загрузился. Проверьте подключение к интернету.','error');return;}
+function createRoom(attempt=0){
+  const supportErr=roomSupportError();
+  if(supportErr){roomStatus(supportErr,'error');return;}
+  closeRoom(true);
+  SYNC.leaving=false;
   const code=randomRoomCode();
   SYNC.role='host';SYNC.room=code;
   $('#roomCode').value=code;drawRoomQr();setRoomUi(true);
   roomStatus('Создаём комнату…');
-  try{SYNC.peer=new Peer(ROOM_PREFIX+code);}catch(err){handleRoomError(err);return;}
-  SYNC.peer.on('open',()=>roomStatus('Код '+code+' · ожидаем подключение дисплея…','ready'));
-  SYNC.peer.on('connection',conn=>bindRoomConnection(conn,'host'));
-  SYNC.peer.on('error',handleRoomError);
+  try{SYNC.peer=new Peer(ROOM_PREFIX+code,peerServerOptions());}catch(err){handleRoomError(err);return;}
+  SYNC.peer.on('open',()=>{
+    if(SYNC.leaving)return;
+    roomStatus('Код '+code+' · ожидаем подключение дисплея…','ready');
+  });
+  SYNC.peer.on('connection',conn=>{if(!SYNC.leaving)bindRoomConnection(conn,'host');});
+  SYNC.peer.on('disconnected',()=>{
+    if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
+    roomStatus('Связь с сервером потеряна — переподключаемся…');
+    try{SYNC.peer.reconnect();}catch(err){handleRoomError(err);}
+  });
+  SYNC.peer.on('error',err=>{
+    if(SYNC.leaving)return;
+    if(err&&err.type==='unavailable-id'&&attempt<3){
+      /* редкая коллизия кодов: пересоздаём комнату с новым кодом */
+      try{SYNC.peer.destroy();}catch(x){}
+      SYNC.peer=null;
+      createRoom(attempt+1);
+      return;
+    }
+    handleRoomError(err);
+  });
+}
+function startViewerConnection(){
+  if(SYNC.leaving||SYNC.role!=='viewer'||!SYNC.room)return;
+  /* Если сигнальный сервер рвался, пир может остаться закрытым/разъединённым —
+     пересоздаём его, чтобы заход в комнату всегда имел шанс. */
+  if(!SYNC.peer||SYNC.peer.destroyed||SYNC.peer.disconnected){
+    if(SYNC.peer){try{SYNC.peer.destroy();}catch(err){}}
+    try{SYNC.peer=new Peer(peerServerOptions());}catch(err){handleRoomError(err);return;}
+    SYNC.peer.on('open',()=>{
+      if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
+      startViewerConnection();
+    });
+    SYNC.peer.on('disconnected',()=>{
+      if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
+      roomStatus('Связь с сервером потеряна — переподключаемся…');
+      try{SYNC.peer.reconnect();}catch(err){handleRoomError(err);}
+    });
+    SYNC.peer.on('error',err=>{
+      if(SYNC.leaving)return;
+      if(err&&err.type==='peer-unavailable'){
+        roomStatus('Комната '+SYNC.room+' не найдена. Проверьте код: у ведущего комната должна быть открыта.','error');
+      }else handleRoomError(err);
+    });
+    return; /* соединение запустится из обработчика 'open' */
+  }
+  const conn=SYNC.peer.connect(ROOM_PREFIX+SYNC.room,{reliable:true});
+  bindRoomConnection(conn,'viewer');
+  clearTimeout(SYNC.joinTimer);
+  SYNC.joinTimer=setTimeout(()=>{
+    if(conn.open||SYNC.leaving)return;
+    roomStatus('Комната '+SYNC.room+' не отвечает. Ведущий должен держать страницу с комнатой открытой.','error');
+    try{conn.close();}catch(err){}
+  },15000);
+}
+function scheduleRejoin(){
+  if(SYNC.leaving||SYNC.role!=='viewer'||!SYNC.room)return;
+  if(!SYNC.peer||SYNC.peer.destroyed){
+    roomStatus('Связь закрыта. Нажмите «Подключиться», чтобы войти заново.','error');
+    return;
+  }
+  if(SYNC.retries>=8){
+    roomStatus('Не удалось вернуться в комнату. Проверьте код и нажмите «Подключиться».','error');
+    return;
+  }
+  SYNC.retries++;
+  roomStatus('Связь прервалась · переподключение ('+SYNC.retries+'/8)…');
+  clearTimeout(SYNC.rejoinTimer);
+  SYNC.rejoinTimer=setTimeout(startViewerConnection,2500);
 }
 function joinRoom(){
-  if(!window.Peer){roomStatus('Сервис связи не загрузился. Проверьте подключение к интернету.','error');return;}
-  const code=$('#roomCode').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if(code.length<4){roomStatus('Введите код комнаты.','error');return;}
-  closeRoom();
-  SYNC.role='viewer';SYNC.room=code;$('#roomCode').value=code;setRoomUi(true);
+  const supportErr=roomSupportError();
+  if(supportErr){roomStatus(supportErr,'error');return;}
+  const code=normalizeRoomCode($('#roomCode').value);
+  if(code.length<4){roomStatus('Введите код комнаты (6 символов).','error');return;}
+  closeRoom(true);
+  SYNC.leaving=false;SYNC.role='viewer';SYNC.room=code;SYNC.retries=0;
+  $('#roomCode').value=code;setRoomUi(true);
   roomStatus('Подключаемся к '+code+'…');
-  try{SYNC.peer=new Peer();}catch(err){handleRoomError(err);return;}
-  SYNC.peer.on('open',()=>bindRoomConnection(SYNC.peer.connect(ROOM_PREFIX+code,{reliable:true}),'viewer'));
-  SYNC.peer.on('error',handleRoomError);
+  try{SYNC.peer=new Peer(peerServerOptions());}catch(err){handleRoomError(err);return;}
+  SYNC.peer.on('open',()=>{
+    if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
+    startViewerConnection();
+  });
+  SYNC.peer.on('disconnected',()=>{
+    if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
+    roomStatus('Связь с сервером потеряна — переподключаемся…');
+    try{SYNC.peer.reconnect();}catch(err){handleRoomError(err);}
+  });
+  SYNC.peer.on('error',err=>{
+    if(SYNC.leaving)return;
+    if(err&&err.type==='peer-unavailable'){
+      roomStatus('Комната '+code+' не найдена. Проверьте код: у ведущего комната должна быть открыта.','error');
+    }else handleRoomError(err);
+  });
 }
 function applySceneState(state){
   if(!state||SYNC.role!=='viewer')return;
@@ -521,23 +674,48 @@ function applySceneState(state){
   S.stepsOn=!!state.stepsOn;S.step=state.step||1;S.stepAnim=state.stepAnim||1;
   S.bodyStyle=state.bodyStyle||S.bodyStyle;S.faceStyle=state.faceStyle||{};
   S.extEdges=new Set(state.extEdges||[]);S.extSection=!!state.extSection;
+  /* Дисплей не вращает сцену сам — ракурс непрерывно присылает ведущий. */
   S.autoRot=false;
   $('#cbSec').checked=S.showSec;$('#cbVtx').checked=S.showVtx;$('#cbGrid').checked=S.showGrid;
-  $('#cbAuto').checked=!!state.autoRot;$('#cbSteps').checked=S.stepsOn;
+  $('#cbAuto').checked=false;$('#cbSteps').checked=S.stepsOn;
   $('#stepsBar').classList.toggle('on',S.stepsOn);updSteps();updInspector();
+  /* Режим «Голограмма» синхронизируется: дисплей под пирамидой показывает 4 проекции. */
+  const ov=$('#holoOv'),holoOn=!!state.holo;
+  if(ov.classList.contains('on')!==holoOn){
+    ov.classList.toggle('on',holoOn);
+    document.body.style.overflow=holoOn?'hidden':'';
+  }
+  $('#holoMir').checked=!!state.holoMir;
   SYNC.applying=false;
 }
-$('#roomCreate').onclick=createRoom;
-$('#roomJoin').onclick=joinRoom;
-$('#roomLeave').onclick=closeRoom;
+$('#roomCreate').onclick=()=>createRoom();
+$('#roomJoin').onclick=()=>joinRoom();
+$('#roomLeave').onclick=()=>closeRoom();
 $('#roomCopy').onclick=async()=>{
   if(!SYNC.room)return;
-  try{await navigator.clipboard.writeText(roomLink());roomStatus('Ссылка скопирована.','ready');}
+  try{await navigator.clipboard.writeText(roomLink());roomStatus('Ссылка дисплея скопирована.','ready');}
   catch(err){roomStatus('Скопируйте код комнаты: '+SYNC.room,'ready');}
 };
-$('#roomCode').addEventListener('input',e=>{e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');});
-const urlRoom=new URLSearchParams(location.search).get('room');
-if(urlRoom){$('#roomCode').value=urlRoom.toUpperCase().slice(0,6);setTimeout(joinRoom,350);}
+$('#roomCode').addEventListener('input',e=>{e.target.value=normalizeRoomCode(e.target.value);});
+
+/* Устройство-дисплей (?mode=display из ссылки/QR): только сцена, без панелей. */
+const urlRoomParams=new URLSearchParams(location.search);
+const isDisplayMode=urlRoomParams.get('mode')==='display';
+if(isDisplayMode){
+  document.body.classList.add('display-mode');
+  const chip=document.createElement('div');
+  chip.id='displayChip';chip.textContent='Ожидание ведущего…';
+  document.body.appendChild(chip);
+  /* Полноэкранный режим браузеры разрешают только по жесту пользователя. */
+  document.addEventListener('pointerdown',requestDisplayFullscreen);
+}
+function requestDisplayFullscreen(){
+  if(!isDisplayMode||document.fullscreenElement)return;
+  const vp=$('#viewport');
+  if(vp&&vp.requestFullscreen)vp.requestFullscreen().catch(()=>{});
+}
+const urlRoom=urlRoomParams.get('room');
+if(urlRoom){$('#roomCode').value=normalizeRoomCode(urlRoom).slice(0,6);setTimeout(joinRoom,350);}
 
 /* ---------- главный цикл ---------- */
 let last=performance.now();
@@ -591,10 +769,11 @@ function loop(now){
 const sel=$('#holoFig');
 FIGKEYS.forEach(([k,n])=>{const o=document.createElement('option');o.value=k;o.textContent=n;sel.appendChild(o);});
 sel.onchange=()=>{const i=TASKS.findIndex(t=>t.f===sel.value);if(i>=0)loadTask(i);};
-function openHolo(){$('#holoOv').classList.add('on');sel.value=S.fig.key;document.body.style.overflow='hidden';}
-function closeHolo(){$('#holoOv').classList.remove('on');document.body.style.overflow='';}
+function openHolo(){$('#holoOv').classList.add('on');sel.value=S.fig.key;document.body.style.overflow='hidden';scheduleSceneState();}
+function closeHolo(){$('#holoOv').classList.remove('on');document.body.style.overflow='';scheduleSceneState();}
 $('#holoOpen').onclick=openHolo;$('#holoOpen2').onclick=openHolo;$('#holoOpen3').onclick=openHolo;
 $('#holoClose').onclick=closeHolo;
+$('#holoMir').onchange=()=>scheduleSceneState();
 
 /* ---------- калькулятор пирамиды ---------- */
 function calcPyr(){

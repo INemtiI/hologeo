@@ -438,3 +438,20 @@ body.stage-is-fullscreen{overflow:hidden}
   .room-row .btn{min-width:0}
   .room-code{width:82px}
 }
+
+/* ---------- общий экран: устройство-дисплей (?mode=display) ---------- */
+/* Устройство под пирамидой показывает только сцену: без шапки, панелей и других секций. */
+body.display-mode>header,body.display-mode>footer,
+body.display-mode #tasks,body.display-mode #holo,body.display-mode #plan,body.display-mode #start,
+body.display-mode .pains,body.display-mode .control-panel,
+body.display-mode .inspector,body.display-mode .toolbar,
+body.display-mode .vp-hint{display:none!important}
+body.display-mode #sim{min-height:100svh}
+body.display-mode .stage-intro .console{height:100svh;min-height:100vh}
+body.display-mode #holoOv .bar{display:none}
+#displayChip{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:70;
+  max-width:92vw;text-align:center;pointer-events:none;
+  background:rgba(8,17,32,.85);border:1px solid var(--line2);border-radius:3px;
+  color:var(--mut);font:500 11px/1.5 "JetBrains Mono";letter-spacing:.05em;padding:7px 12px}
+#displayChip[data-kind="ready"]{color:var(--gr)}
+#displayChip[data-kind="error"]{color:#ff8e85}

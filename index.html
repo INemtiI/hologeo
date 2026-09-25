@@ -104,7 +104,7 @@
 
           <div class="control-section">
             <div class="section-label"><span>// 06</span><b>Общий экран</b></div>
-            <p class="room-note">Создайте комнату на устройстве с пирамидой. Второе устройство подключается по коду или QR и получает изображение в реальном времени.</p>
+            <p class="room-note">Создайте комнату на устройстве, с которого управляете сценой. Дисплей под пирамидой подключите по коду или по QR — он будет повторять сцену в реальном времени, включая режим «Голограмма».</p>
             <div class="room-row">
               <button class="btn sm" id="roomCreate">Создать комнату</button>
               <button class="btn sm" id="roomCopy" disabled>Копировать</button>
@@ -268,9 +268,10 @@
 <script src="js/figures.js"></script>
 <script src="js/section.js"></script>
 <script src="js/render.js"></script>
-<!-- PeerJS даёт сигнальный канал для связи устройств, QRCode рисует код комнаты. -->
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+<!-- PeerJS даёт сигнальный канал для связи устройств, qrcode-generator рисует код комнаты.
+     Библиотеки лежат локально (js/vendor) — «Общий экран» не зависит от доступности CDN. -->
+<script src="js/vendor/peerjs.min.js"></script>
+<script src="js/vendor/qrcode-generator.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
