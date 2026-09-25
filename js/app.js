@@ -25,35 +25,40 @@ const entityMenuBody=$('#entityMenuBody');
 const dpr=Math.min(window.devicePixelRatio||1,2);
 
 /* ---------- общий экран: ведущий управляет, подключённое устройство отображает ---------- */
-/* Связь — WebRTC через PeerJS (библиотека локальная, см. js/vendor). Сигнальный сервер по
-   умолчанию — облако 0.peerjs.com. Если он недоступен из вашей сети, можно указать свой
-   PeerServer параметрами ссылки: ?peerHost=хост&peerPort=порт&peerPath=путь&peerKey=ключ   */
-const SYNC={peer:null,conns:new Set(),role:null,room:'',applying:false,lastSent:0,
-            leaving:false,retries:0,rejoinTimer:0,joinTimer:0};
+/* Транспорт — MQTT поверх защищённого WebSocket через публичные брокеры-ретрансляторы
+   (библиотека локальная, см. js/vendor). Сигнальный сервер и прямое P2P-соединение между
+   устройствами не нужны: ведущий публикует сцену в топик комнаты, дисплеи подписываются
+   на него. Если все публичные брокеры недоступны, свой можно задать в ссылке:
+   ?broker=wss://ваш-хост:порт/путь                                                        */
+const MQTT_BROKERS=[
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt'
+];
+let BROKER_CONNECT_TIMEOUT=8000; /* сколько ждать ответа одного брокера */
+const SYNC={client:null,clientId:'',role:null,room:'',brokerUrl:'',applying:false,lastSent:0,
+            leaving:false,reopening:false,viewers:new Set(),lastStateTs:0,staleNotified:false,
+            liveConfirmed:false};
 function roomStatus(text,kind=''){
   const el=$('#roomStatus');
   if(el){el.textContent=text;el.className='room-status '+kind;}
   const chip=$('#displayChip');
   if(chip){chip.textContent=text;chip.dataset.kind=kind;}
 }
-function openConnCount(){
-  let n=0;
-  for(const c of SYNC.conns)if(c.open)n++;
-  return n;
+function roomSupportError(){
+  if(!window.mqtt||typeof window.mqtt.connect!=='function')return 'Библиотека связи не загрузилась — обновите страницу.';
+  if(typeof WebSocket==='undefined')return 'Браузер не поддерживает WebSocket — обновите его.';
+  if(location.protocol==='file:')return 'Файл открыт с диска — браузер блокирует сетевые соединения. Откройте сайт по ссылке (через HTTPS).';
+  return null;
 }
-function peerServerOptions(){
+function brokerChain(){
   const q=new URLSearchParams(location.search);
-  const host=q.get('peerHost');
-  if(!host)return undefined; /* облако PeerJS по умолчанию */
-  const opts={host,path:q.get('peerPath')||'/'};
-  if(q.get('peerPort'))opts.port=+q.get('peerPort');
-  opts.secure=q.get('peerSecure')?q.get('peerSecure')!=='0':location.protocol==='https:';
-  if(q.get('peerKey'))opts.key=q.get('peerKey');
-  return opts;
+  const own=q.get('broker');
+  return own?[own,...MQTT_BROKERS]:MQTT_BROKERS.slice();
 }
+function roomTopic(){return 'hologeo/'+SYNC.room;}
 function sceneState(){
   return{
-    type:'scene-state',taskIndex:S.taskIndex,pts:S.curPts.map(p=>p.t),
+    type:'scene-state',ts:Date.now(),taskIndex:S.taskIndex,pts:S.curPts.map(p=>p.t),
     yaw:S.yaw,pitch:S.pitch,zoom:S.zoom,autoRot:S.autoRot,
     showSec:S.showSec,showVtx:S.showVtx,showGrid:S.showGrid,
     stepsOn:S.stepsOn,step:S.step,stepAnim:S.stepAnim,
@@ -63,15 +68,13 @@ function sceneState(){
   };
 }
 function sendSceneState(force=false){
-  if(SYNC.role!=='host'||SYNC.applying||!SYNC.conns.size)return;
+  if(SYNC.role!=='host'||SYNC.applying||!SYNC.room)return;
+  if(!SYNC.client||!SYNC.client.connected)return;
   const now=performance.now();
   if(!force&&now-SYNC.lastSent<70)return;
-  const state=sceneState();let sent=false;
-  for(const c of SYNC.conns){
-    if(!c.open)continue;
-    try{c.send(state);sent=true;}catch(err){}
-  }
-  if(sent)SYNC.lastSent=now;
+  SYNC.lastSent=now;
+  /* retain:true — дисплей, подключившийся позже, сразу получает последнюю сцену */
+  try{SYNC.client.publish(roomTopic()+'/state',JSON.stringify(sceneState()),{qos:0,retain:true});}catch(err){}
 }
 function scheduleSceneState(){sendSceneState();}
 function setRoomUi(active){
@@ -466,6 +469,7 @@ function roomLink(){
   const url=new URL(location.href);
   url.searchParams.set('room',SYNC.room);
   url.searchParams.set('mode','display');
+  if(SYNC.brokerUrl)url.searchParams.set('broker',SYNC.brokerUrl);
   url.hash='sim';
   return url.toString();
 }
@@ -488,152 +492,135 @@ function drawRoomQr(){
     qr.hidden=false;
   }catch(err){qr.hidden=true;}
 }
-/* Пределы, в которых «Общий экран» вообще может работать в этом браузере. */
-function roomSupportError(){
-  if(!window.Peer)return 'Библиотека связи не загрузилась — обновите страницу.';
-  if(location.protocol==='file:')return 'Файл открыт с диска — браузер блокирует WebRTC. Откройте сайт по ссылке (через HTTPS).';
-  if(typeof RTCPeerConnection==='undefined')return 'Браузер заблокировал WebRTC: страницу нужно открыть по HTTPS или через localhost.';
-  return null;
+/* Подключение к брокерам по очереди, пока один не ответит. */
+function connectMqtt(onOpen){
+  const chain=brokerChain();
+  const clientId=SYNC.clientId||('hologeo_'+Math.random().toString(16).slice(2,10));
+  SYNC.clientId=clientId;
+  let idx=0;
+  const tryNext=()=>{
+    if(SYNC.leaving)return;
+    if(idx>=chain.length){
+      roomStatus('Не удалось подключиться ни к одному серверу связи. Проверьте интернет — пробуем ещё раз…','error');
+      SYNC.reopening=true;
+      setTimeout(()=>{if(!SYNC.leaving&&SYNC.role&&!SYNC.client)openChannel();},10000);
+      return;
+    }
+    const url=chain[idx++];
+    SYNC.brokerUrl=url;
+    roomStatus((SYNC.reopening?'Переподключение':'Подключение')+' к серверу связи '+(idx)+'/'+chain.length+'…');
+    const opts={clientId,clean:true,connectTimeout:BROKER_CONNECT_TIMEOUT,reconnectPeriod:0,keepalive:30};
+    /* Если дисплей оборвётся без «Выйти», брокер сам снимет его с учёта (last will). */
+    if(SYNC.role==='viewer'&&SYNC.room){
+      opts.will={topic:roomTopic()+'/viewers/'+clientId,payload:'',qos:0,retain:true};
+    }
+    let client;
+    try{
+      client=window.mqtt.connect(url,opts);
+    }catch(err){tryNext();return;}
+    let settled=false;
+    const giveUp=setTimeout(()=>{
+      if(settled)return;settled=true;
+      try{client.end(true);}catch(err){}
+      tryNext();
+    },BROKER_CONNECT_TIMEOUT+1500);
+    /* если брокер быстро ответил отказом (или сеть сбросила соединение) —
+       не ждём таймаута, сразу пробуем следующий */
+    const failover=()=>{
+      if(settled)return;settled=true;clearTimeout(giveUp);
+      try{client.end(true);}catch(err){}
+      tryNext();
+    };
+    client.on('error',failover);
+    client.on('offline',failover);
+    client.on('connect',()=>{
+      if(settled)return;settled=true;clearTimeout(giveUp);
+      if(SYNC.leaving){try{client.end(true);}catch(err){}return;}
+      SYNC.client=client;
+      /* при обрыве связи пробуем заново (с перебором брокеров) */
+      client.on('close',()=>{
+        if(SYNC.leaving||SYNC.client!==client)return;
+        SYNC.reopening=true;
+        try{client.end(true);}catch(err){}
+        SYNC.client=null;
+        setTimeout(()=>{if(!SYNC.leaving)openChannel();},1200);
+      });
+      onOpen(client);
+    });
+  };
+  tryNext();
+}
+function onMqttMessage(topic,payload){
+  if(SYNC.leaving||!SYNC.room)return;
+  const text=typeof payload==='string'?payload:String(payload);
+  if(SYNC.role==='host'&&topic.indexOf(roomTopic()+'/viewers/')===0){
+    const id=topic.slice(topic.lastIndexOf('/')+1);
+    if(text==='1')SYNC.viewers.add(id);else SYNC.viewers.delete(id);
+    hostConnectedStatus();
+    return;
+  }
+  if(SYNC.role==='viewer'&&topic===roomTopic()+'/state'){
+    let data=null;
+    try{data=JSON.parse(text);}catch(err){return;}
+    if(!data||data.type!=='scene-state')return;
+    SYNC.lastStateTs=Date.now();
+    if(SYNC.staleNotified){SYNC.staleNotified=false;roomStatus('Подключено · устройство повторяет сцену ведущего.','ready');}
+    applySceneState(data);
+    if(!SYNC.liveConfirmed){SYNC.liveConfirmed=true;roomStatus('Подключено · устройство повторяет сцену ведущего.','ready');}
+  }
+}
+function hostConnectedStatus(){
+  const n=SYNC.viewers.size;
+  roomStatus(n?'Дисплеев подключено: '+n+' · изображение синхронизируется.':'Код '+SYNC.room+' · ожидаем подключение дисплея…','ready');
+}
+function publishPresence(online){
+  if(!SYNC.client||!SYNC.client.connected)return;
+  try{
+    SYNC.client.publish(roomTopic()+'/viewers/'+SYNC.clientId,online?'1':'',{qos:0,retain:true});
+  }catch(err){}
+}
+function openChannel(){
+  if(SYNC.leaving)return;
+  connectMqtt(client=>{
+    client.on('message',onMqttMessage);
+    if(SYNC.role==='host'){
+      client.subscribe(roomTopic()+'/viewers/#',{qos:0});
+      hostConnectedStatus();
+      drawRoomQr();
+      sendSceneState(true);
+    }else{
+      client.subscribe(roomTopic()+'/state',{qos:0});
+      publishPresence(true);
+      roomStatus('Подключено · ожидание сцены от ведущего…','ready');
+      requestDisplayFullscreen();
+    }
+    SYNC.reopening=false;
+    SYNC.lastStateTs=Date.now();
+  });
 }
 function closeRoom(silent=false){
-  SYNC.leaving=true;
-  clearTimeout(SYNC.rejoinTimer);clearTimeout(SYNC.joinTimer);
-  for(const c of SYNC.conns){try{c.close();}catch(err){}}
-  SYNC.conns.clear();
-  if(SYNC.peer){try{SYNC.peer.destroy();}catch(err){}SYNC.peer=null;}
-  SYNC.role=null;SYNC.room='';SYNC.retries=0;
+  SYNC.leaving=true;SYNC.reopening=false;
+  if(SYNC.role==='viewer'&&SYNC.room&&SYNC.clientId)publishPresence(false);
+  if(SYNC.role==='host'&&SYNC.room&&SYNC.client&&SYNC.client.connected){
+    /* стереть «запомненную» сцену, чтобы поздние дисплеи не видели призрак комнаты */
+    try{SYNC.client.publish(roomTopic()+'/state','',{qos:0,retain:true});}catch(err){}
+  }
+  if(SYNC.client){try{SYNC.client.end(false);}catch(err){try{SYNC.client.end(true);}catch(e){}}}
+  SYNC.client=null;SYNC.role=null;SYNC.room='';SYNC.brokerUrl='';
+  SYNC.viewers.clear();SYNC.lastStateTs=0;SYNC.staleNotified=false;SYNC.liveConfirmed=false;
   $('#roomQr').hidden=true;setRoomUi(false);
   if(!silent)roomStatus('Комната не создана');
 }
-function roomErrorText(err){
-  const t=err&&err.type;
-  switch(t){
-    case 'unavailable-id':return 'Код уже занят — создайте комнату ещё раз.';
-    case 'peer-unavailable':return 'Комната не найдена. Проверьте код: у ведущего комната должна быть открыта.';
-    case 'network':return 'Нет связи с сервером синхронизации. Проверьте интернет и попробуйте ещё раз.';
-    case 'server-error':
-    case 'socket-error':
-    case 'socket-closed':
-      return 'Сервер синхронизации недоступен. Повторите позже или укажите свой PeerServer (?peerHost=…) в ссылке.';
-    case 'browser-incompatible':return 'Браузер не поддерживает WebRTC. Откройте страницу по HTTPS в современном браузере.';
-    case 'ssl-unavailable':return 'Выбранный сервер недоступен по HTTPS. Укажите другой сервер (?peerHost=…).';
-    case 'disconnected':return 'Связь с сервером потеряна — пробуем переподключиться…';
-    default:return 'Не удалось подключить общий экран'+(t?' ('+t+').':'.');
-  }
-}
-function handleRoomError(err){
-  if(SYNC.leaving)return;
-  roomStatus(roomErrorText(err),'error');
-}
-function bindRoomConnection(conn,role){
-  SYNC.conns.add(conn);
-  conn.on('open',()=>{
-    clearTimeout(SYNC.joinTimer);
-    SYNC.retries=0;
-    if(role==='host'){
-      roomStatus('Дисплеев подключено: '+openConnCount()+' · изображение синхронизируется.','ready');
-      sendSceneState(true);
-    }else{
-      roomStatus('Подключено · устройство повторяет сцену ведущего.','ready');
-      requestDisplayFullscreen();
-    }
-  });
-  conn.on('data',data=>{
-    if(role==='viewer'&&data&&data.type==='scene-state')applySceneState(data);
-  });
-  conn.on('close',()=>{
-    SYNC.conns.delete(conn);
-    if(SYNC.leaving)return;
-    if(role==='host'){
-      const n=openConnCount();
-      roomStatus(n?'Дисплеев подключено: '+n+' · изображение синхронизируется.':'Ожидание дисплея…','ready');
-    }else scheduleRejoin();
-  });
-  conn.on('error',err=>{
-    if(SYNC.leaving)return;
-    if(err&&err.type==='peer-unavailable')scheduleRejoin();
-    else handleRoomError(err);
-  });
-}
-function createRoom(attempt=0){
+function createRoom(){
   const supportErr=roomSupportError();
   if(supportErr){roomStatus(supportErr,'error');return;}
   closeRoom(true);
-  SYNC.leaving=false;
-  const code=randomRoomCode();
-  SYNC.role='host';SYNC.room=code;
-  $('#roomCode').value=code;drawRoomQr();setRoomUi(true);
+  SYNC.leaving=false;SYNC.reopening=false;
+  SYNC.role='host';SYNC.room=randomRoomCode();
+  SYNC.clientId=ROOM_PREFIX.toLowerCase()+Math.random().toString(16).slice(2,10);
+  $('#roomCode').value=SYNC.room;setRoomUi(true);
   roomStatus('Создаём комнату…');
-  try{SYNC.peer=new Peer(ROOM_PREFIX+code,peerServerOptions());}catch(err){handleRoomError(err);return;}
-  SYNC.peer.on('open',()=>{
-    if(SYNC.leaving)return;
-    roomStatus('Код '+code+' · ожидаем подключение дисплея…','ready');
-  });
-  SYNC.peer.on('connection',conn=>{if(!SYNC.leaving)bindRoomConnection(conn,'host');});
-  SYNC.peer.on('disconnected',()=>{
-    if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
-    roomStatus('Связь с сервером потеряна — переподключаемся…');
-    try{SYNC.peer.reconnect();}catch(err){handleRoomError(err);}
-  });
-  SYNC.peer.on('error',err=>{
-    if(SYNC.leaving)return;
-    if(err&&err.type==='unavailable-id'&&attempt<3){
-      /* редкая коллизия кодов: пересоздаём комнату с новым кодом */
-      try{SYNC.peer.destroy();}catch(x){}
-      SYNC.peer=null;
-      createRoom(attempt+1);
-      return;
-    }
-    handleRoomError(err);
-  });
-}
-function startViewerConnection(){
-  if(SYNC.leaving||SYNC.role!=='viewer'||!SYNC.room)return;
-  /* Если сигнальный сервер рвался, пир может остаться закрытым/разъединённым —
-     пересоздаём его, чтобы заход в комнату всегда имел шанс. */
-  if(!SYNC.peer||SYNC.peer.destroyed||SYNC.peer.disconnected){
-    if(SYNC.peer){try{SYNC.peer.destroy();}catch(err){}}
-    try{SYNC.peer=new Peer(peerServerOptions());}catch(err){handleRoomError(err);return;}
-    SYNC.peer.on('open',()=>{
-      if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
-      startViewerConnection();
-    });
-    SYNC.peer.on('disconnected',()=>{
-      if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
-      roomStatus('Связь с сервером потеряна — переподключаемся…');
-      try{SYNC.peer.reconnect();}catch(err){handleRoomError(err);}
-    });
-    SYNC.peer.on('error',err=>{
-      if(SYNC.leaving)return;
-      if(err&&err.type==='peer-unavailable'){
-        roomStatus('Комната '+SYNC.room+' не найдена. Проверьте код: у ведущего комната должна быть открыта.','error');
-      }else handleRoomError(err);
-    });
-    return; /* соединение запустится из обработчика 'open' */
-  }
-  const conn=SYNC.peer.connect(ROOM_PREFIX+SYNC.room,{reliable:true});
-  bindRoomConnection(conn,'viewer');
-  clearTimeout(SYNC.joinTimer);
-  SYNC.joinTimer=setTimeout(()=>{
-    if(conn.open||SYNC.leaving)return;
-    roomStatus('Комната '+SYNC.room+' не отвечает. Ведущий должен держать страницу с комнатой открытой.','error');
-    try{conn.close();}catch(err){}
-  },15000);
-}
-function scheduleRejoin(){
-  if(SYNC.leaving||SYNC.role!=='viewer'||!SYNC.room)return;
-  if(!SYNC.peer||SYNC.peer.destroyed){
-    roomStatus('Связь закрыта. Нажмите «Подключиться», чтобы войти заново.','error');
-    return;
-  }
-  if(SYNC.retries>=8){
-    roomStatus('Не удалось вернуться в комнату. Проверьте код и нажмите «Подключиться».','error');
-    return;
-  }
-  SYNC.retries++;
-  roomStatus('Связь прервалась · переподключение ('+SYNC.retries+'/8)…');
-  clearTimeout(SYNC.rejoinTimer);
-  SYNC.rejoinTimer=setTimeout(startViewerConnection,2500);
+  openChannel();
 }
 function joinRoom(){
   const supportErr=roomSupportError();
@@ -641,25 +628,12 @@ function joinRoom(){
   const code=normalizeRoomCode($('#roomCode').value);
   if(code.length<4){roomStatus('Введите код комнаты (6 символов).','error');return;}
   closeRoom(true);
-  SYNC.leaving=false;SYNC.role='viewer';SYNC.room=code;SYNC.retries=0;
+  SYNC.leaving=false;SYNC.reopening=false;
+  SYNC.role='viewer';SYNC.room=code;
+  SYNC.clientId=ROOM_PREFIX.toLowerCase()+Math.random().toString(16).slice(2,10);
   $('#roomCode').value=code;setRoomUi(true);
   roomStatus('Подключаемся к '+code+'…');
-  try{SYNC.peer=new Peer(peerServerOptions());}catch(err){handleRoomError(err);return;}
-  SYNC.peer.on('open',()=>{
-    if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
-    startViewerConnection();
-  });
-  SYNC.peer.on('disconnected',()=>{
-    if(SYNC.leaving||!SYNC.peer||SYNC.peer.destroyed)return;
-    roomStatus('Связь с сервером потеряна — переподключаемся…');
-    try{SYNC.peer.reconnect();}catch(err){handleRoomError(err);}
-  });
-  SYNC.peer.on('error',err=>{
-    if(SYNC.leaving)return;
-    if(err&&err.type==='peer-unavailable'){
-      roomStatus('Комната '+code+' не найдена. Проверьте код: у ведущего комната должна быть открыта.','error');
-    }else handleRoomError(err);
-  });
+  openChannel();
 }
 function applySceneState(state){
   if(!state||SYNC.role!=='viewer')return;
@@ -688,6 +662,17 @@ function applySceneState(state){
   $('#holoMir').checked=!!state.holoMir;
   SYNC.applying=false;
 }
+/* Сторожок: дисплей замечает, что ведущий пропал. */
+function roomWatchdogTick(){
+  if(SYNC.leaving||!SYNC.role||!SYNC.room)return;
+  if(SYNC.role==='viewer'){
+    if(SYNC.liveConfirmed&&SYNC.lastStateTs&&Date.now()-SYNC.lastStateTs>9000&&!SYNC.staleNotified){
+      SYNC.staleNotified=true;
+      roomStatus('Ведущий не отправляет сцену. Проверьте, что у него открыта комната.','error');
+    }
+  }
+}
+setInterval(roomWatchdogTick,3000);
 $('#roomCreate').onclick=()=>createRoom();
 $('#roomJoin').onclick=()=>joinRoom();
 $('#roomLeave').onclick=()=>closeRoom();
