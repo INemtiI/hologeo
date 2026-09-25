@@ -53,16 +53,18 @@
         <div class="console-left">
           <div class="viewport rev" id="viewport">
             <i class="ck tl"></i><i class="ck tr"></i><i class="ck bl"></i><i class="ck br"></i>
-            <div class="toolbar">
+            <div class="toolbar view-toolbar" aria-label="Управление видом">
+              <span class="tool-label">ВИД</span>
               <button class="tbtn" data-v="iso">ИЗО</button>
               <button class="tbtn" data-v="front">СПЕРЕДИ</button>
               <button class="tbtn" data-v="top">СВЕРХУ</button>
               <button class="tbtn" data-v="left">СЛЕВА</button>
               <button class="tbtn" data-v="reset" title="Сброс вида">⟲</button>
+              <button class="tbtn stage-full" id="stageFull" title="Развернуть демонстрацию на весь экран">⛶</button>
             </div>
             <canvas id="viewCv"></canvas>
             <div class="tip" id="tip"></div>
-            <span class="vp-hint">КЛИК — ВЫДЕЛЕНИЕ · ТЯНИ — ВРАЩЕНИЕ · КОЛЕСО / ПИНЧ — МАСШТАБ · ESC — СБРОС ВЫДЕЛЕНИЯ</span>
+            <span class="vp-hint">КЛИК — ВЫДЕЛЕНИЕ · ПКМ — ИНФОРМАЦИЯ · ТЯНИ — ВРАЩЕНИЕ · КОЛЕСО / ПИНЧ — МАСШТАБ</span>
           </div>
 
           <div class="inspector rev">
@@ -72,47 +74,54 @@
           </div>
         </div>
 
-        <aside class="panel rev">
-          <h4>// Тело</h4>
-          <div class="fgrid" id="fGrid"></div>
+        <aside class="panel control-panel rev" aria-label="Панель управления демонстрацией">
+          <div class="control-section">
+            <div class="section-label"><span>// 01</span><b>Тело</b></div>
+            <div class="fgrid" id="fGrid"></div>
+          </div>
 
-          <h4>// Отображение</h4>
-          <label class="tgl"><input type="checkbox" id="cbGrid" checked><span>Оси и сетка координат</span></label>
-          <label class="tgl"><input type="checkbox" id="cbSec" checked><span>Показывать сечение</span></label>
-          <label class="tgl"><input type="checkbox" id="cbVtx" checked><span>Вершины и подписи</span></label>
-          <label class="tgl"><input type="checkbox" id="cbAuto" checked><span>Автовращение</span></label>
-          <label class="tgl"><input type="checkbox" id="cbSteps"><span><b style="color:var(--am)">По шагам</b>&nbsp;(метод следов)</span></label>
+          <div class="control-section">
+            <div class="section-label"><span>// 02</span><b>Отображение</b></div>
+            <label class="tgl"><input type="checkbox" id="cbGrid" checked><span>Оси и сетка координат</span></label>
+            <label class="tgl"><input type="checkbox" id="cbSec" checked><span>Показывать сечение</span></label>
+            <label class="tgl"><input type="checkbox" id="cbVtx" checked><span>Вершины и подписи</span></label>
+            <label class="tgl"><input type="checkbox" id="cbAuto" checked><span>Автовращение</span></label>
+            <label class="tgl"><input type="checkbox" id="cbSteps"><span><b class="accent-label">По шагам</b>&nbsp;(метод следов)</span></label>
+          </div>
 
-          <div style="margin-top:14px"><h4>// Точки сечения</h4></div>
-          <div id="ptRows"></div>
-
-          <div class="stepsbar" id="stepsBar">
-            <div class="st-row">
-              <button id="stPrev">◀</button>
-              <div class="st-dots" id="stDots"><i></i><i></i><i></i><i></i></div>
-              <button id="stNext">▶</button>
+          <div class="control-section">
+            <div class="section-label"><span>// 03</span><b>Точки сечения</b></div>
+            <div id="ptRows"></div>
+            <div class="stepsbar" id="stepsBar">
+              <div class="st-row">
+                <button id="stPrev">◀</button>
+                <div class="st-dots" id="stDots"><i></i><i></i><i></i><i></i></div>
+                <button id="stNext">▶</button>
+              </div>
+              <p id="stTxt"></p>
             </div>
-            <p id="stTxt"></p>
           </div>
 
-          <div style="margin-top:14px"><h4>// Внешний вид</h4></div>
-          <div class="style-row">
-            <input type="color" id="colIn" value="#ffc24b">
-            <input type="range" id="alpIn" min="5" max="90" value="35" style="flex:1">
-            <span class="alp-val" id="alpVal">35%</span>
-          </div>
-          <div class="btnrow">
-            <button class="btn sm" id="btnFace" disabled>Покрасить грань</button>
-            <button class="btn sm" id="btnBody">Покрасить тело</button>
-          </div>
-          <div class="btnrow">
-            <button class="btn sm" id="btnExtEdge" disabled>∞ Продлить ребро</button>
-            <button class="btn sm" id="btnExtSec">∞ Сторы сечения</button>
-            <button class="btn sm" id="btnClear">✕ Сброс</button>
+          <div class="control-section">
+            <div class="section-label"><span>// 04</span><b>Внешний вид</b></div>
+            <div class="style-row">
+              <input type="color" id="colIn" value="#ffc24b">
+              <input type="range" id="alpIn" min="5" max="90" value="35" style="flex:1">
+              <span class="alp-val" id="alpVal">35%</span>
+            </div>
+            <div class="btnrow">
+              <button class="btn sm" id="btnFace" disabled>Покрасить грань</button>
+              <button class="btn sm" id="btnBody">Покрасить тело</button>
+            </div>
+            <div class="btnrow">
+              <button class="btn sm" id="btnExtEdge" disabled>∞ Продлить ребро</button>
+              <button class="btn sm" id="btnExtSec">∞ Стороны сечения</button>
+              <button class="btn sm" id="btnClear">✕ Сброс</button>
+            </div>
           </div>
 
-          <div class="btnrow" style="margin-top:16px">
-            <button class="btn sm" id="holoOpen2">◮ В пирамиду</button>
+          <div class="control-section control-footer">
+            <button class="btn pri sm" id="holoOpen2">◮ В пирамиду</button>
           </div>
         </aside>
       </div>
@@ -247,6 +256,14 @@
   </div>
   <canvas id="holoCv"></canvas>
   <p id="holoHint">Затемни комнату · поставь пирамиду узким квадратом в центр · яркость на максимум</p>
+</div>
+
+<!-- контекстная карточка для объектов сцены -->
+<div id="entityMenu" class="entity-menu" role="dialog" aria-live="polite" hidden>
+  <div class="entity-menu-kicker">// ИНФОРМАЦИЯ ОБ ОБЪЕКТЕ</div>
+  <div class="entity-menu-title" id="entityMenuTitle"></div>
+  <div class="entity-menu-body" id="entityMenuBody"></div>
+  <div class="entity-menu-hint">ПКМ по объекту — открыть снова</div>
 </div>
 
 <script src="js/vec.js"></script>

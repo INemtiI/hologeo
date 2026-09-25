@@ -19,6 +19,9 @@ const pointers=new Map();
 const viewCv=$('#viewCv'),vctx=viewCv.getContext('2d');
 const holoCv=$('#holoCv'),off=document.createElement('canvas');
 const tip=$('#tip');
+const entityMenu=$('#entityMenu');
+const entityMenuTitle=$('#entityMenuTitle');
+const entityMenuBody=$('#entityMenuBody');
 const dpr=Math.min(window.devicePixelRatio||1,2);
 
 /* ---------- загрузка тел и задач ---------- */
@@ -199,7 +202,7 @@ $$('.tbtn').forEach(b=>b.onclick=()=>{
 });
 addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
-  if(e.key==='Escape'){S.sel=null;updInspector();closeHolo();}
+  if(e.key==='Escape'){S.sel=null;hideEntityMenu();updInspector();closeHolo();}
   if(e.key==='r'||e.key==='к'){S.yaw=-0.62;S.pitch=0.46;S.zoom=1;}
   if(e.key==='g'||e.key==='п'){S.showGrid=!S.showGrid;$('#cbGrid').checked=S.showGrid;}
 });
@@ -210,6 +213,9 @@ const pinchDist=()=>{
   return Math.hypot(p[0].x-p[1].x,p[0].y-p[1].y);
 };
 viewCv.addEventListener('pointerdown',e=>{
+  /* Правая кнопка нужна контекстному меню, а не вращению сцены. */
+  if(e.button!==0&&e.pointerType==='mouse')return;
+  hideEntityMenu();
   viewCv.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===1){
@@ -237,7 +243,7 @@ const endPointer=e=>{
   if(pointers.size<2)pinchD=0;
   if(dragging&&pointers.size===0){
     dragging=false;
-    if(moved<6)handleClick(e);
+    if(moved<6&&e.button===0)handleClick(e);
   }
 };
 viewCv.addEventListener('pointerup',endPointer);
@@ -281,6 +287,84 @@ function handleClick(e){
   S.sel=p;
   updInspector();
 }
+
+/* ---------- контекстная информация по точке, ребру или грани ---------- */
+function entityName(entity){
+  const f=S.fig;
+  if(entity.type==='vertex')return f.labeled?f.labels[entity.index]:'v'+entity.index;
+  if(entity.type==='edge'){
+    const a=f.labeled?f.labels[entity.a]:'v'+entity.a;
+    const b=f.labeled?f.labels[entity.b]:'v'+entity.b;
+    return a+b;
+  }
+  if(entity.type==='face'){
+    const ids=f.faces[entity.index];
+    return f.labeled?ids.map(i=>f.labels[i]).join(''):'грань №'+(entity.index+1);
+  }
+  return 'объект';
+}
+function showEntityMenu(entity,x,y){
+  if(!entity){hideEntityMenu();return;}
+  const f=S.fig,name=entityName(entity);
+  S.sel=entity;
+  updInspector();
+  entityMenuTitle.textContent=name+' · '+({vertex:'точка',edge:'ребро',face:'грань'}[entity.type]||'объект');
+  if(entity.type==='vertex'){
+    entityMenuBody.innerHTML='<strong>Координаты</strong><br><span class="menu-value">'+fmtC(f.verts[entity.index])+'</span>';
+  }else if(entity.type==='edge'){
+    const a=f.verts[entity.a],b=f.verts[entity.b];
+    entityMenuBody.innerHTML='<strong>Длина ребра</strong><br><span class="menu-value">|'+name+'| = '+fmt(len(sub(b,a)))+'</span>';
+  }else if(entity.type==='face'){
+    const pts=f.faces[entity.index].map(i=>f.verts[i]);
+    entityMenuBody.innerHTML='<strong>Площадь грани</strong><br><span class="menu-value">S = '+fmt(polyArea3D(pts))+'</span>';
+  }
+  entityMenu.hidden=false;
+  /* Сначала ставим карточку рядом с курсором, затем не даём ей уйти за экран. */
+  const gap=12,rect=entityMenu.getBoundingClientRect();
+  const left=x+gap+rect.width>innerWidth?x-rect.width-gap:x+gap;
+  const top=y+gap+rect.height>innerHeight?y-rect.height-gap:y+gap;
+  entityMenu.style.left=Math.max(8,Math.min(left,innerWidth-rect.width-8))+'px';
+  entityMenu.style.top=Math.max(8,Math.min(top,innerHeight-rect.height-8))+'px';
+}
+function hideEntityMenu(){
+  if(entityMenu)entityMenu.hidden=true;
+}
+viewCv.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  const r=viewCv.getBoundingClientRect();
+  const entity=pickAt(e.clientX-r.left,e.clientY-r.top);
+  if(entity)showEntityMenu(entity,e.clientX,e.clientY);
+  else{
+    hideEntityMenu();
+    S.sel=null;
+    updInspector();
+  }
+});
+document.addEventListener('pointerdown',e=>{
+  if(entityMenu&&!entityMenu.contains(e.target)&&e.target!==viewCv)hideEntityMenu();
+});
+
+/* ---------- полноэкранное окно демонстрации ---------- */
+const stageFull=$('#stageFull');
+function syncFullscreenButton(){
+  const active=document.fullscreenElement=== $('#viewport') || $('#viewport').classList.contains('fullscreen-fallback');
+  stageFull.textContent=active?'⤢':'⛶';
+  stageFull.title=active?'Выйти из полноэкранного режима':'Развернуть демонстрацию на весь экран';
+}
+async function toggleStageFullscreen(){
+  const stage=$('#viewport');
+  try{
+    if(document.fullscreenElement)await document.exitFullscreen();
+    else if(stage.requestFullscreen)await stage.requestFullscreen();
+    else throw new Error('fullscreen is not supported');
+  }catch(err){
+    stage.classList.toggle('fullscreen-fallback');
+    document.body.classList.toggle('stage-is-fullscreen',stage.classList.contains('fullscreen-fallback'));
+    syncFullscreenButton();
+  }
+}
+stageFull.onclick=toggleStageFullscreen;
+document.addEventListener('fullscreenchange',syncFullscreenButton);
 
 /* ---------- главный цикл ---------- */
 let last=performance.now();
