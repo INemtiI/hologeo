@@ -16,7 +16,7 @@
 <header>
   <div class="wrap hrow">
     <a class="logo" href="#sim">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2.5 21.5 19.5H2.5Z" stroke="#5fe6ff" stroke-width="1.6"/><path d="M9 13.5h6L12 8.5Z" stroke="#ffc24b" stroke-width="1.2"/><path d="M12 2.5v17" stroke="#2e4d7c" stroke-width="1"/></svg>
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2.5 21.5 19.5H2.5Z" stroke="#5fe6ff" stroke-width="1.6"/><path d="M9 13.5h6L12 8.5Z" stroke="#2dd4bf" stroke-width="1.2"/><path d="M12 2.5v17" stroke="#2e4d7c" stroke-width="1"/></svg>
       <span><b>ГОЛОГРАНЬ</b><small>СТЕРЕОМЕТРИЯ · 10 КЛАСС</small></span>
     </a>
     <nav>
@@ -30,89 +30,96 @@
 
   <!-- intro + simulator -->
   <section id="sim">
-    <div class="intro">
-      <div class="row">
-        <span class="chip">MVP v0.2</span>
-        <span class="chip dim">программный прототип · этап 2</span>
-        <span class="chip amb">эффект Пеппера</span>
-      </div>
-      <h1>Сечения, которые <em>видно в объёме</em>, а не на плоском чертеже</h1>
-      <p class="lead">Тело в декартовой системе координат, честное построение сечения по шагам, измерения длин и площадей — и вывод на псевдоголографическую пирамиду.</p>
-      <div class="feat">
-        <span class="chip dim">декартова система</span>
-        <span class="chip dim">8 тел</span>
-        <span class="chip dim">координаты точек</span>
-        <span class="chip dim">длины · площади · объём</span>
-        <span class="chip dim">выделение и покраска</span>
-        <span class="chip dim">продление прямых</span>
-        <span class="chip dim">метод следов · 4 шага</span>
-        <span class="chip dim">4 проекции под пирамиду</span>
-      </div>
-
+    <div class="intro stage-intro">
       <div class="console">
         <div class="console-left">
           <div class="viewport rev" id="viewport">
             <i class="ck tl"></i><i class="ck tr"></i><i class="ck bl"></i><i class="ck br"></i>
-            <div class="toolbar">
-              <button class="tbtn" data-v="iso">ИЗО</button>
-              <button class="tbtn" data-v="front">СПЕРЕДИ</button>
-              <button class="tbtn" data-v="top">СВЕРХУ</button>
-              <button class="tbtn" data-v="left">СЛЕВА</button>
-              <button class="tbtn" data-v="reset" title="Сброс вида">⟲</button>
+            <div class="toolbar stage-actions" aria-label="Управление демонстрацией">
+              <span class="tool-label">СЦЕНА</span>
+              <button class="tbtn stage-full" id="stageFull" title="Развернуть демонстрацию на весь экран">⛶</button>
             </div>
             <canvas id="viewCv"></canvas>
             <div class="tip" id="tip"></div>
-            <span class="vp-hint">КЛИК — ВЫДЕЛЕНИЕ · ТЯНИ — ВРАЩЕНИЕ · КОЛЕСО / ПИНЧ — МАСШТАБ · ESC — СБРОС ВЫДЕЛЕНИЯ</span>
+            <span class="vp-hint">КЛИК — ВЫДЕЛЕНИЕ · ПКМ — ИНФОРМАЦИЯ · ТЯНИ — ВРАЩЕНИЕ · КОЛЕСО / ПИНЧ — МАСШТАБ</span>
           </div>
 
-          <div class="inspector rev">
-            <div class="cell"><h4>// Тело</h4><div id="mFig"></div></div>
-            <div class="cell"><h4>// Выделено</h4><div id="mSel"><span class="dim">кликни по вершине, ребру или грани</span></div></div>
-            <div class="cell"><h4>// Сечение</h4><div id="mSec">—</div></div>
-          </div>
         </div>
 
-        <aside class="panel rev">
-          <h4>// Тело</h4>
-          <div class="fgrid" id="fGrid"></div>
+        <aside class="panel control-panel rev" aria-label="Панель управления демонстрацией">
+          <div class="control-section">
+            <div class="section-label"><span>// 01</span><b>Тело</b></div>
+            <div class="fgrid" id="fGrid"></div>
+          </div>
 
-          <h4>// Отображение</h4>
-          <label class="tgl"><input type="checkbox" id="cbGrid" checked><span>Оси и сетка координат</span></label>
-          <label class="tgl"><input type="checkbox" id="cbSec" checked><span>Показывать сечение</span></label>
-          <label class="tgl"><input type="checkbox" id="cbVtx" checked><span>Вершины и подписи</span></label>
-          <label class="tgl"><input type="checkbox" id="cbAuto" checked><span>Автовращение</span></label>
-          <label class="tgl"><input type="checkbox" id="cbSteps"><span><b style="color:var(--am)">По шагам</b>&nbsp;(метод следов)</span></label>
+          <div class="control-section">
+            <div class="section-label"><span>// 02</span><b>Отображение</b></div>
+            <label class="tgl"><input type="checkbox" id="cbGrid" checked><span>Оси и сетка координат</span></label>
+            <label class="tgl"><input type="checkbox" id="cbSec" checked><span>Показывать сечение</span></label>
+            <label class="tgl"><input type="checkbox" id="cbVtx" checked><span>Вершины и подписи</span></label>
+            <label class="tgl"><input type="checkbox" id="cbAuto" checked><span>Автовращение</span></label>
+            <label class="tgl"><input type="checkbox" id="cbSteps"><span><b class="accent-label">По шагам</b>&nbsp;(метод следов)</span></label>
+          </div>
 
-          <div style="margin-top:14px"><h4>// Точки сечения</h4></div>
-          <div id="ptRows"></div>
-
-          <div class="stepsbar" id="stepsBar">
-            <div class="st-row">
-              <button id="stPrev">◀</button>
-              <div class="st-dots" id="stDots"><i></i><i></i><i></i><i></i></div>
-              <button id="stNext">▶</button>
+          <div class="control-section">
+            <div class="section-label"><span>// 03</span><b>Точки сечения</b></div>
+            <div id="ptRows"></div>
+            <div class="stepsbar" id="stepsBar">
+              <div class="st-row">
+                <button id="stPrev">◀</button>
+                <div class="st-dots" id="stDots"><i></i><i></i><i></i><i></i></div>
+                <button id="stNext">▶</button>
+              </div>
+              <p id="stTxt"></p>
             </div>
-            <p id="stTxt"></p>
           </div>
 
-          <div style="margin-top:14px"><h4>// Внешний вид</h4></div>
-          <div class="style-row">
-            <input type="color" id="colIn" value="#ffc24b">
-            <input type="range" id="alpIn" min="5" max="90" value="35" style="flex:1">
-            <span class="alp-val" id="alpVal">35%</span>
-          </div>
-          <div class="btnrow">
-            <button class="btn sm" id="btnFace" disabled>Покрасить грань</button>
-            <button class="btn sm" id="btnBody">Покрасить тело</button>
-          </div>
-          <div class="btnrow">
-            <button class="btn sm" id="btnExtEdge" disabled>∞ Продлить ребро</button>
-            <button class="btn sm" id="btnExtSec">∞ Сторы сечения</button>
-            <button class="btn sm" id="btnClear">✕ Сброс</button>
+          <div class="control-section">
+            <div class="section-label"><span>// 04</span><b>Внешний вид</b></div>
+            <div class="style-row">
+              <input type="color" id="colIn" value="#2dd4bf">
+              <input type="range" id="alpIn" min="5" max="90" value="35" style="flex:1">
+              <span class="alp-val" id="alpVal">35%</span>
+            </div>
+            <div class="btnrow">
+              <button class="btn sm" id="btnFace" disabled>Покрасить грань</button>
+              <button class="btn sm" id="btnBody">Покрасить тело</button>
+            </div>
+            <div class="btnrow">
+              <button class="btn sm" id="btnExtEdge" disabled>∞ Продлить ребро</button>
+              <button class="btn sm" id="btnExtSec">∞ Стороны сечения</button>
+              <button class="btn sm" id="btnClear">✕ Сброс</button>
+            </div>
           </div>
 
-          <div class="btnrow" style="margin-top:16px">
-            <button class="btn sm" id="holoOpen2">◮ В пирамиду</button>
+          <div class="control-section">
+            <div class="section-label"><span>// 05</span><b>Углы</b></div>
+            <div class="btnrow">
+              <button class="btn sm" id="angleMode">Измерить угол</button>
+              <button class="btn sm" id="angleClear">Сбросить</button>
+            </div>
+            <p class="angle-hint" id="angleHint">Выберите два ребра для плоского угла или две грани для двугранного.</p>
+            <div class="angle-value" id="angleValue">—</div>
+          </div>
+
+          <div class="control-section">
+            <div class="section-label"><span>// 06</span><b>Общий экран</b></div>
+            <p class="room-note">Создайте комнату на устройстве с пирамидой. Второе устройство подключается по коду или QR и получает изображение в реальном времени.</p>
+            <div class="room-row">
+              <button class="btn sm" id="roomCreate">Создать комнату</button>
+              <button class="btn sm" id="roomCopy" disabled>Копировать</button>
+              <button class="btn sm" id="roomLeave" disabled>Выйти</button>
+            </div>
+            <div class="room-row room-join-row">
+              <input id="roomCode" class="room-code" inputmode="text" maxlength="6" placeholder="КОД">
+              <button class="btn sm" id="roomJoin">Подключиться</button>
+            </div>
+            <canvas id="roomQr" width="156" height="156" hidden></canvas>
+            <div class="room-status" id="roomStatus">Комната не создана</div>
+          </div>
+
+          <div class="control-section control-footer">
+            <button class="btn pri sm" id="holoOpen2">◮ В пирамиду</button>
           </div>
         </aside>
       </div>
@@ -146,12 +153,12 @@
             <text x="44" y="262" font-family="JetBrains Mono,monospace" font-size="10" fill="#8ba3c4">ЭКРАН (ПЛАНШЕТ / ТЕЛЕФОН)</text>
             <path d="M180 242 L340 242 L280 182 L240 182 Z" fill="rgba(95,230,255,.07)" stroke="#5fe6ff" stroke-width="1.4"/>
             <path d="M340 242 L280 182" stroke="#9df2ff" stroke-width="1.6"/>
-            <path d="M336 242 A 20 20 0 0 0 326 227" fill="none" stroke="#ffc24b" stroke-width="1.2"/>
-            <text x="308" y="236" font-family="JetBrains Mono,monospace" font-size="10" fill="#ffc24b">45°</text>
-            <rect x="243" y="246" width="14" height="12" fill="none" stroke="#ffc24b" stroke-width="1.4"/>
+            <path d="M336 242 A 20 20 0 0 0 326 227" fill="none" stroke="#2dd4bf" stroke-width="1.2"/>
+            <text x="308" y="236" font-family="JetBrains Mono,monospace" font-size="10" fill="#2dd4bf">45°</text>
+            <rect x="243" y="246" width="14" height="12" fill="none" stroke="#2dd4bf" stroke-width="1.4"/>
             <text x="215" y="272" font-family="JetBrains Mono,monospace" font-size="9" fill="#8ba3c4">ОБЪЕКТ НА ЭКРАНЕ</text>
-            <line class="ray" x1="252" y1="248" x2="304" y2="216" stroke="#ffc24b" stroke-width="1.6"/>
-            <line class="ray" x1="304" y1="216" x2="420" y2="140" stroke="#ffc24b" stroke-width="1.6"/>
+            <line class="ray" x1="252" y1="248" x2="304" y2="216" stroke="#2dd4bf" stroke-width="1.6"/>
+            <line class="ray" x1="304" y1="216" x2="420" y2="140" stroke="#2dd4bf" stroke-width="1.6"/>
             <line x1="304" y1="216" x2="262" y2="140" stroke="#5fe6ff" stroke-width="1" stroke-dasharray="3 5" opacity=".7"/>
             <g class="ghostimg">
               <path d="M262 118 L284 152 L240 152 Z" fill="rgba(95,230,255,.12)" stroke="#9df2ff" stroke-width="1.4" stroke-dasharray="5 4"/>
@@ -249,10 +256,21 @@
   <p id="holoHint">Затемни комнату · поставь пирамиду узким квадратом в центр · яркость на максимум</p>
 </div>
 
+<!-- контекстная карточка для объектов сцены -->
+<div id="entityMenu" class="entity-menu" role="dialog" aria-live="polite" hidden>
+  <div class="entity-menu-kicker">// ИНФОРМАЦИЯ ОБ ОБЪЕКТЕ</div>
+  <div class="entity-menu-title" id="entityMenuTitle"></div>
+  <div class="entity-menu-body" id="entityMenuBody"></div>
+  <div class="entity-menu-hint">ПКМ по объекту — открыть снова</div>
+</div>
+
 <script src="js/vec.js"></script>
 <script src="js/figures.js"></script>
 <script src="js/section.js"></script>
 <script src="js/render.js"></script>
+<!-- PeerJS даёт сигнальный канал для связи устройств, QRCode рисует код комнаты. -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

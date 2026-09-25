@@ -90,7 +90,7 @@ function renderScene(ctx,W,H,o){
 
   /* продлённые рёбра */
   if(!holo&&st.extEdges.size){
-    ctx.strokeStyle='rgba(255,194,75,.55)';ctx.lineWidth=1.2;
+    ctx.strokeStyle='rgba(45,212,191,.55)';ctx.lineWidth=1.2;
     for(const k of st.extEdges){
       const[a,b]=k.split('_').map(Number);
       const A=fig.verts[a],B=fig.verts[b],d=nrm(sub(B,A));
@@ -153,16 +153,16 @@ function renderScene(ctx,W,H,o){
   /* след плоскости */
   if(!holo&&st.trace&&(st.stepsOn?st.step>=2:true)){
     const a=P.pr(st.trace[0]),b=P.pr(st.trace[1]);
-    ctx.setLineDash([7,6]);ctx.strokeStyle='rgba(255,194,75,.85)';ctx.lineWidth=1.3;
+    ctx.setLineDash([7,6]);ctx.strokeStyle='rgba(45,212,191,.85)';ctx.lineWidth=1.3;
     ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.setLineDash([]);
-    ctx.font='italic 13px "JetBrains Mono"';ctx.fillStyle='rgba(255,194,75,.9)';
+    ctx.font='italic 13px "JetBrains Mono"';ctx.fillStyle='rgba(45,212,191,.9)';
     ctx.fillText('ℓ',b.x+6,b.y+4);
   }
 
   /* точки пересечения (шаг 3+) */
   if(!holo&&st.stepsOn&&st.step>=3){
     const raws=st.step===3?st.sec.raw:st.sec.poly;
-    ctx.fillStyle='#ffc24b';
+    ctx.fillStyle='#2dd4bf';
     raws.forEach(p=>{const q=P.pr(p);ctx.beginPath();ctx.arc(q.x,q.y,2.6,0,TAU);ctx.fill();});
   }
 
@@ -197,20 +197,34 @@ function renderScene(ctx,W,H,o){
 
   /* подсветка выделения */
   if(!holo&&st.sel&&pv){
-    ctx.save();ctx.shadowColor='rgba(255,194,75,.7)';ctx.shadowBlur=8;
+    ctx.save();ctx.shadowColor='rgba(45,212,191,.7)';ctx.shadowBlur=8;
     if(st.sel.type==='face'){
       const ids=fig.faces[st.sel.index];
       ctx.beginPath();ids.forEach((id,j)=>j?ctx.lineTo(pv[id].x,pv[id].y):ctx.moveTo(pv[id].x,pv[id].y));
-      ctx.closePath();ctx.strokeStyle='#ffc24b';ctx.lineWidth=2;ctx.stroke();
+      ctx.closePath();ctx.strokeStyle='#2dd4bf';ctx.lineWidth=2;ctx.stroke();
     }else if(st.sel.type==='edge'){
       ctx.beginPath();ctx.moveTo(pv[st.sel.a].x,pv[st.sel.a].y);
       ctx.lineTo(pv[st.sel.b].x,pv[st.sel.b].y);
-      ctx.strokeStyle='#ffc24b';ctx.lineWidth=3.2;ctx.stroke();
+      ctx.strokeStyle='#2dd4bf';ctx.lineWidth=3.2;ctx.stroke();
     }else if(st.sel.type==='vertex'){
       const q=pv[st.sel.index];
       ctx.beginPath();ctx.arc(q.x,q.y,6.5,0,TAU);
-      ctx.strokeStyle='#ffc24b';ctx.lineWidth=2;ctx.stroke();
+      ctx.strokeStyle='#2dd4bf';ctx.lineWidth=2;ctx.stroke();
     }
+    ctx.restore();
+  }
+
+  /* выбранные объекты для измерения угла */
+  if(!holo&&st.anglePicks&&st.anglePicks.length){
+    ctx.save();ctx.shadowColor='rgba(105,240,160,.75)';ctx.shadowBlur=7;
+    ctx.strokeStyle='#69f0a0';ctx.lineWidth=2.4;
+    st.anglePicks.forEach(p=>{
+      if(p.type==='edge'){
+        ctx.beginPath();ctx.moveTo(pv[p.a].x,pv[p.a].y);ctx.lineTo(pv[p.b].x,pv[p.b].y);ctx.stroke();
+      }else if(p.type==='face'){
+        const ids=fig.faces[p.index];ctx.beginPath();ids.forEach((id,j)=>j?ctx.lineTo(pv[id].x,pv[id].y):ctx.moveTo(pv[id].x,pv[id].y));ctx.closePath();ctx.stroke();
+      }
+    });
     ctx.restore();
   }
 
@@ -221,9 +235,9 @@ function renderScene(ctx,W,H,o){
       if(!st.pts3[i])return;
       const q=P.pr(st.pts3[i]);
       ctx.beginPath();ctx.arc(q.x,q.y,5,0,TAU);
-      ctx.fillStyle='#ffc24b';ctx.fill();
+      ctx.fillStyle='#2dd4bf';ctx.fill();
       ctx.lineWidth=2;ctx.strokeStyle='#081120';ctx.stroke();
-      ctx.fillStyle='#ffc24b';ctx.fillText(nm,q.x+9,q.y-8);
+      ctx.fillStyle='#2dd4bf';ctx.fillText(nm,q.x+9,q.y-8);
     });
   }
 
