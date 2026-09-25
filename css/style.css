@@ -360,3 +360,8 @@ footer a:hover{color:var(--cy)}
   background:#081120;
 }
 body.stage-is-fullscreen{overflow:hidden}
+
+/* Сцена открывается сразу под шапкой: без вводного текста и лишних карточек. */
+#sim{min-height:calc(100svh - 58px)}
+.stage-intro{padding:0}
+.stage-intro .console{margin-left:calc(50% - 50vw)}
