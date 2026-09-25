@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 
 const S={
   fig:null,taskIndex:0,curPts:[],pts3:[],plane:null,trace:null,sec:{poly:[],raw:[],name:'—'},
-  yaw:0,pitch:1.55,zoom:1,autoRot:true,
+  yaw:0,pitch:Math.PI/2,zoom:1,autoRot:true,
   stepsOn:false,step:1,stepAnim:1,
   showSec:true,showVtx:true,showGrid:true,
   sel:null,anglePicks:[],angleMode:false,
@@ -201,7 +201,7 @@ $('#taskGrid').addEventListener('click',e=>{
 addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
   if(e.key==='Escape'){S.sel=null;hideEntityMenu();updInspector();closeHolo();}
-  if(e.key==='r'||e.key==='к'){S.yaw=0;S.pitch=1.55;S.zoom=1;scheduleSceneState();}
+  if(e.key==='r'||e.key==='к'){S.yaw=0;S.pitch=Math.PI/2;S.zoom=1;scheduleSceneState();}
   if(e.key==='g'||e.key==='п'){S.showGrid=!S.showGrid;$('#cbGrid').checked=S.showGrid;scheduleSceneState();}
 });
 
