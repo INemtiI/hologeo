@@ -3,11 +3,11 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 
 const S={
-  fig:null,curPts:[],pts3:[],plane:null,trace:null,sec:{poly:[],raw:[],name:'—'},
-  yaw:-0.62,pitch:0.46,zoom:1,autoRot:true,
+  fig:null,taskIndex:0,curPts:[],pts3:[],plane:null,trace:null,sec:{poly:[],raw:[],name:'—'},
+  yaw:0,pitch:1.55,zoom:1,autoRot:true,
   stepsOn:false,step:1,stepAnim:1,
   showSec:true,showVtx:true,showGrid:true,
-  sel:null,
+  sel:null,anglePicks:[],angleMode:false,
   bodyStyle:{color:'#6ea8ff',alpha:0.13},
   faceStyle:{},
   extEdges:new Set(),extSection:false,
@@ -24,6 +24,37 @@ const entityMenuTitle=$('#entityMenuTitle');
 const entityMenuBody=$('#entityMenuBody');
 const dpr=Math.min(window.devicePixelRatio||1,2);
 
+/* ---------- общий экран: ведущий управляет, подключённое устройство отображает ---------- */
+const SYNC={peer:null,conn:null,role:null,room:'',applying:false,lastSent:0};
+function roomStatus(text,kind=''){
+  const el=$('#roomStatus');
+  if(el){el.textContent=text;el.className='room-status '+kind;}
+}
+function sceneState(){
+  return{
+    type:'scene-state',taskIndex:S.taskIndex,pts:S.curPts.map(p=>p.t),
+    yaw:S.yaw,pitch:S.pitch,zoom:S.zoom,autoRot:S.autoRot,
+    showSec:S.showSec,showVtx:S.showVtx,showGrid:S.showGrid,
+    stepsOn:S.stepsOn,step:S.step,stepAnim:S.stepAnim,
+    bodyStyle:S.bodyStyle,faceStyle:S.faceStyle,
+    extEdges:[...S.extEdges],extSection:S.extSection
+  };
+}
+function sendSceneState(force=false){
+  if(SYNC.role!=='host'||!SYNC.conn||!SYNC.conn.open||SYNC.applying)return;
+  const now=performance.now();
+  if(!force&&now-SYNC.lastSent<70)return;
+  SYNC.lastSent=now;
+  SYNC.conn.send(sceneState());
+}
+function scheduleSceneState(){sendSceneState();}
+function setRoomUi(active){
+  $('#roomCreate').disabled=active&&SYNC.role==='host';
+  $('#roomJoin').disabled=active&&SYNC.role==='viewer';
+  $('#roomCopy').disabled=!SYNC.room;
+  $('#roomLeave').disabled=!active;
+}
+
 /* ---------- загрузка тел и задач ---------- */
 function mkEdgePt(a,b,t){
   const ia=S.fig.labIdx[a],ib=S.fig.labIdx[b];
@@ -32,15 +63,17 @@ function mkEdgePt(a,b,t){
 }
 function setFig(k){
   S.fig=buildFig(k);
-  S.faceStyle={};S.extEdges.clear();S.extSection=false;S.sel=null;
+  S.faceStyle={};S.extEdges.clear();S.extSection=false;S.sel=null;S.anglePicks=[];S.angleMode=false;
   $$('.fbtn').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
   $('#cbVtx').disabled=!S.fig.labeled;
 }
 function loadTask(i){
   const t=TASKS[i];
+  S.taskIndex=i;
   setFig(t.f);
   S.curPts=t.pts.map(p=>Array.isArray(p)?mkEdgePt(p[0],p[1],p[2]):{fn:p.fn,t:p.t,hint:p.hint});
   syncSliders();recompute();
+  scheduleSceneState();
 }
 function syncSliders(){
   S.curPts.forEach((p,i)=>{
@@ -66,45 +99,14 @@ function recompute(){
 
 /* ---------- панель измерений ---------- */
 function updInspector(){
-  const f=S.fig;
-  let mFig=`<span class="val">${f.name}</span><br><b>V</b> = <span class="val">${fmt(figVolume(f))}</span>&nbsp;&nbsp;<b>S<sub>пов</sub></b> = <span class="val">${fmt(figSurface(f))}</span>`;
-  if(f.kind!=='sph')mFig+=`<br>вершин: ${f.verts.length} · рёбер: ${f.edges.length} · граней: ${f.faces.length}`;
-  $('#mFig').innerHTML=mFig;
-
-  let hs='<span class="dim">кликни по вершине, ребру или грани</span>';
-  if(S.sel){
-    if(S.sel.type==='vertex'){
-      const i=S.sel.index,lb=f.labeled?f.labels[i]:('v'+i);
-      hs=`<b>${lb}</b> — вершина<br>координаты: <span class="val">${fmtC(f.verts[i])}</span>`;
-    }else if(S.sel.type==='edge'){
-      const A=f.verts[S.sel.a],B=f.verts[S.sel.b];
-      const la=f.labeled?f.labels[S.sel.a]:('v'+S.sel.a);
-      const lb=f.labeled?f.labels[S.sel.b]:('v'+S.sel.b);
-      hs=`<b>${la}${lb}</b> — ребро<br><b>|${la}${lb}|</b> = <span class="val">${fmt(len(sub(B,A)))}</span><br>${la} <span class="val">${fmtC(A)}</span><br>${lb} <span class="val">${fmtC(B)}</span>`;
-    }else if(S.sel.type==='face'){
-      const ids=f.faces[S.sel.index],pts=ids.map(i=>f.verts[i]);
-      const names=f.labeled?ids.map(i=>f.labels[i]).join(''):('грань №'+(S.sel.index+1));
-      hs=`<b>${names}</b> — грань (${ids.length} верш.)<br><b>S</b> = <span class="val">${fmt(polyArea3D(pts))}</span>&nbsp;&nbsp;<b>P</b> = <span class="val">${fmt(polyPerimeter3D(pts))}</span>`;
-    }
-  }
-  $('#mSel').innerHTML=hs;
   $('#btnFace').disabled=!(S.sel&&S.sel.type==='face');
   $('#btnExtEdge').disabled=!(S.sel&&S.sel.type==='edge');
   if(S.sel&&S.sel.type==='edge'){
     const k=Math.min(S.sel.a,S.sel.b)+'_'+Math.max(S.sel.a,S.sel.b);
-    $('#btnExtEdge').textContent=S.extEdges.has(k)?'✓ ребро продлено':'∞ продлить ребро';
-  }else $('#btnExtEdge').textContent='∞ продлить ребро';
-  $('#btnExtSec').textContent=S.extSection?'✓ стороны продлены':'∞ продлить стороны сечения';
-
-  let hc='—';
-  if(S.plane&&S.sec.poly.length>=3){
-    const pts=S.sec.poly,sides=[];
-    for(let i=0;i<pts.length;i++)sides.push(fmt(len(sub(pts[i],pts[(i+1)%pts.length]))));
-    hc=`<b>${S.sec.name}</b><br><b>S</b> = <span class="val">${fmt(polyArea3D(pts))}</span>&nbsp;&nbsp;<b>P</b> = <span class="val">${fmt(polyPerimeter3D(pts))}</span>`+
-      `<details><summary>координаты вершин (${pts.length})</summary><div class="coord-list">${pts.map((p,i)=>'P'+(i+1)+' '+fmtC(p)).join('<br>')}</div></details>`+
-      `<details><summary>длины сторон</summary><div class="coord-list">${sides.join(' · ')}</div></details>`;
-  }else if(S.plane)hc='<span class="dim">плоскость почти не задевает тело</span>';
-  $('#mSec').innerHTML=hc;
+    $('#btnExtEdge').textContent=S.extEdges.has(k)?'✓ ребро продлено':'∞ Продлить ребро';
+  }else $('#btnExtEdge').textContent='∞ Продлить ребро';
+  $('#btnExtSec').textContent=S.extSection?'✓ Стороны сечения':'∞ Стороны сечения';
+  updateAnglePanel();
 }
 
 /* ---------- шаги построения ---------- */
@@ -125,41 +127,42 @@ function updSteps(){
   $$('#stDots i').forEach((d,i)=>d.classList.toggle('on',i<S.step));
   $('#stTxt').textContent=stepText();
 }
-$('#stPrev').onclick=()=>{S.step=Math.max(1,S.step-1);updSteps();};
-$('#stNext').onclick=()=>{S.step=Math.min(4,S.step+1);if(S.step===4)S.stepAnim=0;updSteps();};
+$('#stPrev').onclick=()=>{S.step=Math.max(1,S.step-1);updSteps();scheduleSceneState();};
+$('#stNext').onclick=()=>{S.step=Math.min(4,S.step+1);if(S.step===4)S.stepAnim=0;updSteps();scheduleSceneState();};
 $('#cbSteps').onchange=e=>{
   S.stepsOn=e.target.checked;
   $('#stepsBar').classList.toggle('on',S.stepsOn);
-  S.step=1;S.stepAnim=0;updSteps();
+  S.step=1;S.stepAnim=0;updSteps();scheduleSceneState();
 };
-$('#cbSec').onchange=e=>S.showSec=e.target.checked;
-$('#cbVtx').onchange=e=>S.showVtx=e.target.checked;
-$('#cbGrid').onchange=e=>S.showGrid=e.target.checked;
-$('#cbAuto').onchange=e=>S.autoRot=e.target.checked;
+$('#cbSec').onchange=e=>{S.showSec=e.target.checked;scheduleSceneState();};
+$('#cbVtx').onchange=e=>{S.showVtx=e.target.checked;scheduleSceneState();};
+$('#cbGrid').onchange=e=>{S.showGrid=e.target.checked;scheduleSceneState();};
+$('#cbAuto').onchange=e=>{S.autoRot=e.target.checked;scheduleSceneState();};
 
 /* ---------- внешний вид ---------- */
 $('#alpIn').oninput=e=>$('#alpVal').textContent=e.target.value+'%';
 $('#btnFace').onclick=()=>{
   if(S.sel&&S.sel.type==='face'){
     S.faceStyle[S.sel.index]={color:$('#colIn').value,alpha:+$('#alpIn').value/100};
-    updInspector();
+    updInspector();scheduleSceneState();
   }
 };
 $('#btnBody').onclick=()=>{
   S.bodyStyle={color:$('#colIn').value,alpha:+$('#alpIn').value/100};
+  scheduleSceneState();
 };
 $('#btnExtEdge').onclick=()=>{
   if(S.sel&&S.sel.type==='edge'){
     const k=Math.min(S.sel.a,S.sel.b)+'_'+Math.max(S.sel.a,S.sel.b);
     S.extEdges.has(k)?S.extEdges.delete(k):S.extEdges.add(k);
-    updInspector();
+    updInspector();scheduleSceneState();
   }
 };
-$('#btnExtSec').onclick=()=>{S.extSection=!S.extSection;updInspector();};
+$('#btnExtSec').onclick=()=>{S.extSection=!S.extSection;updInspector();scheduleSceneState();};
 $('#btnClear').onclick=()=>{
   S.faceStyle={};S.bodyStyle={color:'#6ea8ff',alpha:0.13};
-  S.extEdges.clear();S.extSection=false;S.sel=null;
-  updInspector();
+  S.extEdges.clear();S.extSection=false;S.sel=null;S.anglePicks=[];
+  updInspector();scheduleSceneState();
 };
 
 /* ---------- UI: тела, ползунки, задачи ---------- */
@@ -177,6 +180,7 @@ FIGKEYS.forEach(([k,n])=>{
     S.curPts[i].t=e.target.value/1000;
     $('#v'+i).textContent=Math.round(S.curPts[i].t*100)+'%';
     recompute();
+    scheduleSceneState();
   });
 });
 $('#taskGrid').innerHTML=TASKS.map((t,i)=>`
@@ -193,18 +197,12 @@ $('#taskGrid').addEventListener('click',e=>{
   const vp=$('#viewport');vp.classList.add('flash');setTimeout(()=>vp.classList.remove('flash'),900);
 });
 
-/* ---------- виды и клавиатура ---------- */
-const VIEWS={iso:[-0.62,0.46],front:[0,0.02],top:[0,1.55],left:[-Math.PI/2,0.02]};
-$$('.tbtn').forEach(b=>b.onclick=()=>{
-  const v=b.dataset.v;
-  if(v==='reset'){S.yaw=-0.62;S.pitch=0.46;S.zoom=1;return;}
-  [S.yaw,S.pitch]=VIEWS[v];
-});
+/* ---------- клавиатура ---------- */
 addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT')return;
   if(e.key==='Escape'){S.sel=null;hideEntityMenu();updInspector();closeHolo();}
-  if(e.key==='r'||e.key==='к'){S.yaw=-0.62;S.pitch=0.46;S.zoom=1;}
-  if(e.key==='g'||e.key==='п'){S.showGrid=!S.showGrid;$('#cbGrid').checked=S.showGrid;}
+  if(e.key==='r'||e.key==='к'){S.yaw=0;S.pitch=1.55;S.zoom=1;scheduleSceneState();}
+  if(e.key==='g'||e.key==='п'){S.showGrid=!S.showGrid;$('#cbGrid').checked=S.showGrid;scheduleSceneState();}
 });
 
 /* ---------- управление мышью / касанием ---------- */
@@ -236,6 +234,7 @@ viewCv.addEventListener('pointermove',e=>{
     S.yaw+=dx*0.006;
     S.pitch=clamp(S.pitch-dy*0.005,-0.15,1.56);
     lx=e.clientX;ly=e.clientY;
+    scheduleSceneState();
   }else hoverAt(e);
 });
 const endPointer=e=>{
@@ -251,6 +250,7 @@ viewCv.addEventListener('pointercancel',endPointer);
 viewCv.addEventListener('wheel',e=>{
   e.preventDefault();
   S.zoom=clamp(S.zoom*Math.exp(-e.deltaY*0.0012),0.4,4);
+  scheduleSceneState();
 },{passive:false});
 viewCv.addEventListener('dblclick',()=>{S.sel=null;updInspector();});
 viewCv.addEventListener('pointerleave',()=>{tip.style.display='none';});
@@ -281,12 +281,75 @@ function pickAt(x,y){
   for(const f of faces)if(pointInPoly(x,y,f.poly))return{type:'face',index:f.idx};
   return null;
 }
+function anglePickKey(p){
+  if(p.type==='edge')return'edge:'+Math.min(p.a,p.b)+'_'+Math.max(p.a,p.b);
+  return'face:'+p.index;
+}
+function edgeDirection(a,b){
+  const common=[a.a,a.b].find(v=>v===b.a||v===b.b);
+  if(common!==undefined){
+    const ao=a.a===common?a.b:a.a;
+    const bo=b.a===common?b.b:b.a;
+    return[sub(S.fig.verts[ao],S.fig.verts[common]),sub(S.fig.verts[bo],S.fig.verts[common])];
+  }
+  return[sub(S.fig.verts[a.b],S.fig.verts[a.a]),sub(S.fig.verts[b.b],S.fig.verts[b.a])];
+}
+function degrees(rad){return rad*180/Math.PI}
+function angleResult(){
+  if(S.anglePicks.length<2)return null;
+  const[a,b]=S.anglePicks;
+  if(a.type==='edge'&&b.type==='edge'){
+    const[v1,v2]=edgeDirection(a,b);
+    return{title:'Плоский угол',value:degrees(Math.acos(clamp(dot(nrm(v1),nrm(v2)),-1,1))),detail:'между двумя рёбрами'};
+  }
+  if(a.type==='face'&&b.type==='face'){
+    const normal=degrees(Math.acos(clamp(dot(S.fig.fn[a.index],S.fig.fn[b.index]),-1,1)));
+    return{title:'Двугранный угол',value:180-normal,detail:'внутренний угол между гранями'};
+  }
+  return{title:'Несовместимый выбор',value:null,detail:'выберите два ребра или две грани одного типа'};
+}
+function updateAnglePanel(){
+  const btn=$('#angleMode'),hint=$('#angleHint'),out=$('#angleValue');
+  if(!btn||!hint||!out)return;
+  btn.classList.toggle('on',S.angleMode);
+  btn.textContent=S.angleMode?'Завершить выбор':'Измерить угол';
+  const result=angleResult();
+  if(!S.anglePicks.length){
+    hint.textContent='Выберите два ребра для плоского угла или две грани для двугранного.';
+    out.textContent='—';
+  }else if(!result){
+    hint.textContent='Выберите второй объект такого же типа.';
+    out.textContent='Выбрано: '+entityName(S.anglePicks[0]);
+  }else if(result.value===null){
+    hint.textContent=result.detail;
+    out.textContent='—';
+  }else{
+    hint.textContent=result.detail;
+    out.innerHTML='<b>'+result.title+'</b><strong>'+fmt(result.value)+'°</strong>';
+  }
+}
 function handleClick(e){
   const r=viewCv.getBoundingClientRect();
   const p=pickAt(e.clientX-r.left,e.clientY-r.top);
+  if(S.angleMode){
+    if(p&&(p.type==='edge'||p.type==='face')){
+      const key=anglePickKey(p);
+      if(!S.anglePicks.some(q=>anglePickKey(q)===key))S.anglePicks.push(p);
+      S.sel=p;
+      if(S.anglePicks.length>=2)S.angleMode=false;
+      updInspector();
+    }
+    return;
+  }
   S.sel=p;
   updInspector();
 }
+$('#angleMode').onclick=()=>{
+  S.angleMode=!S.angleMode;
+  if(S.angleMode)S.anglePicks=[];
+  updateAnglePanel();
+};
+$('#angleClear').onclick=()=>{S.angleMode=false;S.anglePicks=[];updateAnglePanel();};
 
 /* ---------- контекстная информация по точке, ребру или грани ---------- */
 function entityName(entity){
@@ -366,6 +429,116 @@ async function toggleStageFullscreen(){
 stageFull.onclick=toggleStageFullscreen;
 document.addEventListener('fullscreenchange',syncFullscreenButton);
 
+/* ---------- комнаты общего экрана ---------- */
+const ROOM_PREFIX='hologeo-';
+const roomAlphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function randomRoomCode(){
+  return Array.from({length:6},()=>roomAlphabet[Math.floor(Math.random()*roomAlphabet.length)]).join('');
+}
+function roomLink(){
+  const url=new URL(location.href);
+  url.searchParams.set('room',SYNC.room);
+  url.searchParams.set('mode','display');
+  url.hash='sim';
+  return url.toString();
+}
+function drawRoomQr(){
+  const qr=$('#roomQr');
+  if(!SYNC.room){qr.hidden=true;return;}
+  qr.hidden=false;
+  if(window.QRCode&&QRCode.toCanvas){
+    QRCode.toCanvas(qr,roomLink(),{width:156,margin:1,color:{dark:'#081120',light:'#dffaff'}},err=>{
+      if(err){qr.hidden=true;roomStatus('QR-код не удалось построить, используйте код.','error');}
+    });
+  }else{
+    qr.hidden=true;
+    roomStatus('QR-библиотека недоступна — используйте код комнаты.','error');
+  }
+}
+function closeRoom(){
+  if(SYNC.conn){try{SYNC.conn.close();}catch(err){}SYNC.conn=null;}
+  if(SYNC.peer){try{SYNC.peer.destroy();}catch(err){}SYNC.peer=null;}
+  SYNC.role=null;SYNC.room='';
+  $('#roomQr').hidden=true;setRoomUi(false);
+  roomStatus('Комната не создана');
+}
+function handleRoomError(err){
+  const msg=err&&err.type==='unavailable-id'?'Код уже занят — создайте комнату ещё раз.':'Не удалось подключить общий экран.';
+  roomStatus(msg,'error');
+}
+function bindRoomConnection(conn,role){
+  SYNC.conn=conn;
+  conn.on('open',()=>{
+    if(role==='host'){
+      roomStatus('Дисплей подключён · изображение синхронизируется.','ready');
+      sendSceneState(true);
+    }else{
+      roomStatus('Подключено · это устройство только отображает сцену.','ready');
+    }
+  });
+  conn.on('data',data=>{
+    if(role==='viewer'&&data&&data.type==='scene-state')applySceneState(data);
+  });
+  conn.on('close',()=>{
+    SYNC.conn=null;
+    roomStatus(role==='host'?'Ожидание дисплея…':'Связь закрыта.','');
+  });
+  conn.on('error',handleRoomError);
+}
+function createRoom(){
+  closeRoom();
+  if(!window.Peer){roomStatus('Сервис связи не загрузился. Проверьте подключение к интернету.','error');return;}
+  const code=randomRoomCode();
+  SYNC.role='host';SYNC.room=code;
+  $('#roomCode').value=code;drawRoomQr();setRoomUi(true);
+  roomStatus('Создаём комнату…');
+  try{SYNC.peer=new Peer(ROOM_PREFIX+code);}catch(err){handleRoomError(err);return;}
+  SYNC.peer.on('open',()=>roomStatus('Код '+code+' · ожидаем подключение дисплея…','ready'));
+  SYNC.peer.on('connection',conn=>bindRoomConnection(conn,'host'));
+  SYNC.peer.on('error',handleRoomError);
+}
+function joinRoom(){
+  if(!window.Peer){roomStatus('Сервис связи не загрузился. Проверьте подключение к интернету.','error');return;}
+  const code=$('#roomCode').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(code.length<4){roomStatus('Введите код комнаты.','error');return;}
+  closeRoom();
+  SYNC.role='viewer';SYNC.room=code;$('#roomCode').value=code;setRoomUi(true);
+  roomStatus('Подключаемся к '+code+'…');
+  try{SYNC.peer=new Peer();}catch(err){handleRoomError(err);return;}
+  SYNC.peer.on('open',()=>bindRoomConnection(SYNC.peer.connect(ROOM_PREFIX+code,{reliable:true}),'viewer'));
+  SYNC.peer.on('error',handleRoomError);
+}
+function applySceneState(state){
+  if(!state||SYNC.role!=='viewer')return;
+  SYNC.applying=true;
+  if(Number.isInteger(state.taskIndex)&&TASKS[state.taskIndex]&&state.taskIndex!==S.taskIndex)loadTask(state.taskIndex);
+  if(Array.isArray(state.pts))S.curPts.forEach((p,i)=>{if(state.pts[i]!==undefined)p.t=state.pts[i];});
+  syncSliders();recompute();
+  S.yaw=Number.isFinite(state.yaw)?state.yaw:S.yaw;
+  S.pitch=Number.isFinite(state.pitch)?state.pitch:S.pitch;
+  S.zoom=Number.isFinite(state.zoom)?state.zoom:S.zoom;
+  S.showSec=state.showSec!==false;S.showVtx=state.showVtx!==false;S.showGrid=state.showGrid!==false;
+  S.stepsOn=!!state.stepsOn;S.step=state.step||1;S.stepAnim=state.stepAnim||1;
+  S.bodyStyle=state.bodyStyle||S.bodyStyle;S.faceStyle=state.faceStyle||{};
+  S.extEdges=new Set(state.extEdges||[]);S.extSection=!!state.extSection;
+  S.autoRot=false;
+  $('#cbSec').checked=S.showSec;$('#cbVtx').checked=S.showVtx;$('#cbGrid').checked=S.showGrid;
+  $('#cbAuto').checked=!!state.autoRot;$('#cbSteps').checked=S.stepsOn;
+  $('#stepsBar').classList.toggle('on',S.stepsOn);updSteps();updInspector();
+  SYNC.applying=false;
+}
+$('#roomCreate').onclick=createRoom;
+$('#roomJoin').onclick=joinRoom;
+$('#roomLeave').onclick=closeRoom;
+$('#roomCopy').onclick=async()=>{
+  if(!SYNC.room)return;
+  try{await navigator.clipboard.writeText(roomLink());roomStatus('Ссылка скопирована.','ready');}
+  catch(err){roomStatus('Скопируйте код комнаты: '+SYNC.room,'ready');}
+};
+$('#roomCode').addEventListener('input',e=>{e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');});
+const urlRoom=new URLSearchParams(location.search).get('room');
+if(urlRoom){$('#roomCode').value=urlRoom.toUpperCase().slice(0,6);setTimeout(joinRoom,350);}
+
 /* ---------- главный цикл ---------- */
 let last=performance.now();
 function drawMain(){
@@ -408,6 +581,7 @@ function drawHolo(){
 function loop(now){
   const dt=Math.min(.05,(now-last)/1000);last=now;
   if(S.autoRot&&!dragging)S.yaw+=dt*0.35;
+  if(SYNC.role==='host'&&now-SYNC.lastSent>120)sendSceneState(true);
   if(S.stepsOn&&S.step===4&&S.stepAnim<1)S.stepAnim=Math.min(1,S.stepAnim+dt*1.1);
   if($('#holoOv').classList.contains('on'))drawHolo();else drawMain();
   requestAnimationFrame(loop);

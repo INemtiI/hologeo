@@ -214,6 +214,20 @@ function renderScene(ctx,W,H,o){
     ctx.restore();
   }
 
+  /* выбранные объекты для измерения угла */
+  if(!holo&&st.anglePicks&&st.anglePicks.length){
+    ctx.save();ctx.shadowColor='rgba(105,240,160,.75)';ctx.shadowBlur=7;
+    ctx.strokeStyle='#69f0a0';ctx.lineWidth=2.4;
+    st.anglePicks.forEach(p=>{
+      if(p.type==='edge'){
+        ctx.beginPath();ctx.moveTo(pv[p.a].x,pv[p.a].y);ctx.lineTo(pv[p.b].x,pv[p.b].y);ctx.stroke();
+      }else if(p.type==='face'){
+        const ids=fig.faces[p.index];ctx.beginPath();ids.forEach((id,j)=>j?ctx.lineTo(pv[id].x,pv[id].y):ctx.moveTo(pv[id].x,pv[id].y));ctx.closePath();ctx.stroke();
+      }
+    });
+    ctx.restore();
+  }
+
   /* точки P, Q, R */
   if(!holo){
     ctx.font='700 12px "JetBrains Mono"';

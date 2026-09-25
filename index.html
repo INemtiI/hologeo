@@ -35,13 +35,8 @@
         <div class="console-left">
           <div class="viewport rev" id="viewport">
             <i class="ck tl"></i><i class="ck tr"></i><i class="ck bl"></i><i class="ck br"></i>
-            <div class="toolbar view-toolbar" aria-label="Управление видом">
-              <span class="tool-label">ВИД</span>
-              <button class="tbtn" data-v="iso">ИЗО</button>
-              <button class="tbtn" data-v="front">СПЕРЕДИ</button>
-              <button class="tbtn" data-v="top">СВЕРХУ</button>
-              <button class="tbtn" data-v="left">СЛЕВА</button>
-              <button class="tbtn" data-v="reset" title="Сброс вида">⟲</button>
+            <div class="toolbar stage-actions" aria-label="Управление демонстрацией">
+              <span class="tool-label">СЦЕНА</span>
               <button class="tbtn stage-full" id="stageFull" title="Развернуть демонстрацию на весь экран">⛶</button>
             </div>
             <canvas id="viewCv"></canvas>
@@ -49,11 +44,6 @@
             <span class="vp-hint">КЛИК — ВЫДЕЛЕНИЕ · ПКМ — ИНФОРМАЦИЯ · ТЯНИ — ВРАЩЕНИЕ · КОЛЕСО / ПИНЧ — МАСШТАБ</span>
           </div>
 
-          <div class="inspector rev">
-            <div class="cell"><h4>// Тело</h4><div id="mFig"></div></div>
-            <div class="cell"><h4>// Выделено</h4><div id="mSel"><span class="dim">кликни по вершине, ребру или грани</span></div></div>
-            <div class="cell"><h4>// Сечение</h4><div id="mSec">—</div></div>
-          </div>
         </div>
 
         <aside class="panel control-panel rev" aria-label="Панель управления демонстрацией">
@@ -100,6 +90,32 @@
               <button class="btn sm" id="btnExtSec">∞ Стороны сечения</button>
               <button class="btn sm" id="btnClear">✕ Сброс</button>
             </div>
+          </div>
+
+          <div class="control-section">
+            <div class="section-label"><span>// 05</span><b>Углы</b></div>
+            <div class="btnrow">
+              <button class="btn sm" id="angleMode">Измерить угол</button>
+              <button class="btn sm" id="angleClear">Сбросить</button>
+            </div>
+            <p class="angle-hint" id="angleHint">Выберите два ребра для плоского угла или две грани для двугранного.</p>
+            <div class="angle-value" id="angleValue">—</div>
+          </div>
+
+          <div class="control-section">
+            <div class="section-label"><span>// 06</span><b>Общий экран</b></div>
+            <p class="room-note">Создайте комнату на устройстве с пирамидой. Второе устройство подключается по коду или QR и получает изображение в реальном времени.</p>
+            <div class="room-row">
+              <button class="btn sm" id="roomCreate">Создать комнату</button>
+              <button class="btn sm" id="roomCopy" disabled>Копировать</button>
+              <button class="btn sm" id="roomLeave" disabled>Выйти</button>
+            </div>
+            <div class="room-row room-join-row">
+              <input id="roomCode" class="room-code" inputmode="text" maxlength="6" placeholder="КОД">
+              <button class="btn sm" id="roomJoin">Подключиться</button>
+            </div>
+            <canvas id="roomQr" width="156" height="156" hidden></canvas>
+            <div class="room-status" id="roomStatus">Комната не создана</div>
           </div>
 
           <div class="control-section control-footer">
@@ -252,6 +268,9 @@
 <script src="js/figures.js"></script>
 <script src="js/section.js"></script>
 <script src="js/render.js"></script>
+<!-- PeerJS даёт сигнальный канал для связи устройств, QRCode рисует код комнаты. -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
