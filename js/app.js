@@ -25,19 +25,21 @@ const entityMenuBody=$('#entityMenuBody');
 const dpr=Math.min(window.devicePixelRatio||1,2);
 
 /* ---------- общий экран: ведущий управляет, подключённое устройство отображает ---------- */
-/* Транспорт — MQTT поверх защищённого WebSocket через публичные брокеры-ретрансляторы
-   (библиотека локальная, см. js/vendor). Сигнальный сервер и прямое P2P-соединение между
-   устройствами не нужны: ведущий публикует сцену в топик комнаты, дисплеи подписываются
-   на него. Если все публичные брокеры недоступны, свой можно задать в ссылке:
-   ?broker=wss://ваш-хост:порт/путь                                                        */
+/* Два транспорта на выбор, автоматически:
+   1) РЕТРАНСЛЯТОР — маленький HTTP-сервер без зависимостей (relay/server.js). Обычные
+      запросы, проходит через любые прокси; запускается вместе с сайтом или на своём хосте.
+      Свой адрес: ?relay=http://хост:порт. В предпросмотре адрес определяется сам.
+   2) MQTT через публичные брокеры (библиотека локальная, см. js/vendor) — запасной канал,
+      если ретранслятор не задан/недоступен. Свой брокер: ?broker=wss://хост:порт/путь.   */
 const MQTT_BROKERS=[
   'wss://broker.emqx.io:8084/mqtt',
   'wss://broker.hivemq.com:8884/mqtt'
 ];
 let BROKER_CONNECT_TIMEOUT=8000; /* сколько ждать ответа одного брокера */
-const SYNC={client:null,clientId:'',role:null,room:'',brokerUrl:'',applying:false,lastSent:0,
+const SYNC={client:null,clientId:'',role:null,room:'',brokerUrl:'',relayBase:'',transport:'',
+            applying:false,lastSent:0,relayTs:0,pollMisses:0,pollAbort:null,relayFailed:false,
             leaving:false,reopening:false,viewers:new Set(),lastStateTs:0,staleNotified:false,
-            liveConfirmed:false};
+            liveConfirmed:false,relayTimers:[]};
 function roomStatus(text,kind=''){
   const el=$('#roomStatus');
   if(el){el.textContent=text;el.className='room-status '+kind;}
@@ -45,10 +47,34 @@ function roomStatus(text,kind=''){
   if(chip){chip.textContent=text;chip.dataset.kind=kind;}
 }
 function roomSupportError(){
-  if(!window.mqtt||typeof window.mqtt.connect!=='function')return 'Библиотека связи не загрузилась — обновите страницу.';
-  if(typeof WebSocket==='undefined')return 'Браузер не поддерживает WebSocket — обновите его.';
+  if(typeof fetch!=='function')return 'Браузер устарел и не поддерживает fetch — обновите его.';
   if(location.protocol==='file:')return 'Файл открыт с диска — браузер блокирует сетевые соединения. Откройте сайт по ссылке (через HTTPS).';
   return null;
+}
+/* --- адрес ретранслятора: параметр ?relay, иначе автоопределение для предпросмотра --- */
+function relayBaseUrl(){
+  const q=new URLSearchParams(location.search);
+  const own=q.get('relay');
+  if(own)return own.replace(/\/+$/,'');
+  /* предпросмотр вида 8080-abc123.e2b.app → ретранслятор на 8081-abc123.e2b.app */
+  const m=location.hostname.match(/^(\d+)-(.+)$/);
+  if(m&&location.hostname.includes('.e2b.app'))return location.protocol+'//8081-'+m[2];
+  if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){
+    return location.protocol+'//'+location.hostname+':8081';
+  }
+  return '';
+}
+async function detectRelay(){
+  if(SYNC.relayFailed)return null;
+  const base=relayBaseUrl();
+  if(!base)return null;
+  try{
+    const ctl=new AbortController();
+    const timer=setTimeout(()=>ctl.abort(),3500);
+    const r=await fetch(base+'/ping',{signal:ctl.signal,cache:'no-store'});
+    clearTimeout(timer);
+    return r.ok?base:null;
+  }catch(err){return null;}
 }
 function brokerChain(){
   const q=new URLSearchParams(location.search);
@@ -69,14 +95,49 @@ function sceneState(){
 }
 function sendSceneState(force=false){
   if(SYNC.role!=='host'||SYNC.applying||!SYNC.room)return;
-  if(!SYNC.client||!SYNC.client.connected)return;
   const now=performance.now();
   if(!force&&now-SYNC.lastSent<70)return;
-  SYNC.lastSent=now;
-  /* retain:true — дисплей, подключившийся позже, сразу получает последнюю сцену */
-  try{SYNC.client.publish(roomTopic()+'/state',JSON.stringify(sceneState()),{qos:0,retain:true});}catch(err){}
+  if(SYNC.transport==='relay'){
+    if(!SYNC.relayBase)return;
+    SYNC.lastSent=now;
+    fetch(SYNC.relayBase+'/room/'+SYNC.room+'/state',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(sceneState())
+    }).then(r=>{
+      if(!r.ok)throw new Error('relay '+r.status);
+      SYNC.pollMisses=0;
+    }).catch(()=>{
+      if(SYNC.leaving)return;
+      SYNC.pollMisses++;
+      if(SYNC.pollMisses>=5){
+        SYNC.relayFailed=true;
+        roomStatus('Ретранслятор недоступен — переключаемся на резервный канал…');
+        reopenChannel();
+      }
+    });
+    return;
+  }
+  if(SYNC.transport==='mqtt'){
+    if(!SYNC.client||!SYNC.client.connected)return;
+    SYNC.lastSent=now;
+    /* retain:true — дисплей, подключившийся позже, сразу получает последнюю сцену */
+    try{SYNC.client.publish(roomTopic()+'/state',JSON.stringify(sceneState()),{qos:0,retain:true});}catch(err){}
+  }
 }
 function scheduleSceneState(){sendSceneState();}
+function reopenChannel(){
+  if(SYNC.leaving||!SYNC.role||!SYNC.room)return;
+  if(SYNC.client){try{SYNC.client.end(true);}catch(err){}SYNC.client=null;}
+  stopRelayTimers();
+  SYNC.transport='';
+  SYNC.reopening=true;
+  setTimeout(()=>{if(!SYNC.leaving)openChannel();},800);
+}
+function stopRelayTimers(){
+  for(const t of SYNC.relayTimers){clearInterval(t);clearTimeout(t);}
+  SYNC.relayTimers=[];
+  if(SYNC.pollAbort){try{SYNC.pollAbort.abort();}catch(err){}SYNC.pollAbort=null;}
+}
 function setRoomUi(active){
   $('#roomCreate').disabled=active&&SYNC.role==='host';
   $('#roomJoin').disabled=active&&SYNC.role==='viewer';
@@ -469,7 +530,8 @@ function roomLink(){
   const url=new URL(location.href);
   url.searchParams.set('room',SYNC.room);
   url.searchParams.set('mode','display');
-  if(SYNC.brokerUrl)url.searchParams.set('broker',SYNC.brokerUrl);
+  if(SYNC.transport==='mqtt'&&SYNC.brokerUrl)url.searchParams.set('broker',SYNC.brokerUrl);
+  if(SYNC.transport==='relay'&&SYNC.relayBase)url.searchParams.set('relay',SYNC.relayBase);
   url.hash='sim';
   return url.toString();
 }
@@ -564,14 +626,19 @@ function onMqttMessage(topic,payload){
     try{data=JSON.parse(text);}catch(err){return;}
     if(!data||data.type!=='scene-state')return;
     SYNC.lastStateTs=Date.now();
-    if(SYNC.staleNotified){SYNC.staleNotified=false;roomStatus('Подключено · устройство повторяет сцену ведущего.','ready');}
+    if(SYNC.staleNotified){SYNC.staleNotified=false;roomStatus('Подключено · '+channelLabel()+' · устройство повторяет сцену ведущего.','ready');}
     applySceneState(data);
-    if(!SYNC.liveConfirmed){SYNC.liveConfirmed=true;roomStatus('Подключено · устройство повторяет сцену ведущего.','ready');}
+    if(!SYNC.liveConfirmed){SYNC.liveConfirmed=true;roomStatus('Подключено · '+channelLabel()+' · устройство повторяет сцену ведущего.','ready');}
   }
+}
+function channelLabel(){
+  return SYNC.transport==='relay'?'ретранслятор':(SYNC.transport==='mqtt'?'MQTT-брокер':'канал');
 }
 function hostConnectedStatus(){
   const n=SYNC.viewers.size;
-  roomStatus(n?'Дисплеев подключено: '+n+' · изображение синхронизируется.':'Код '+SYNC.room+' · ожидаем подключение дисплея…','ready');
+  roomStatus(n
+    ?'Дисплеев подключено: '+n+' · '+channelLabel()+' · изображение синхронизируется.'
+    :'Код '+SYNC.room+' · '+channelLabel()+' · ожидаем подключение дисплея…','ready');
 }
 function publishPresence(online){
   if(!SYNC.client||!SYNC.client.connected)return;
@@ -579,9 +646,84 @@ function publishPresence(online){
     SYNC.client.publish(roomTopic()+'/viewers/'+SYNC.clientId,online?'1':'',{qos:0,retain:true});
   }catch(err){}
 }
-function openChannel(){
+/* ---------- канал через ретранслятор (обычный HTTP, без WebSocket) ---------- */
+function openRelayChannel(base){
+  SYNC.transport='relay';SYNC.relayBase=base;SYNC.pollMisses=0;SYNC.relayTs=0;
+  if(SYNC.role==='host'){
+    hostConnectedStatus();
+    drawRoomQr();
+    sendSceneState(true);
+    const t=setInterval(()=>{ /* счётчик дисплеев */
+      if(SYNC.leaving||SYNC.transport!=='relay')return;
+      fetch(SYNC.relayBase+'/room/'+SYNC.room+'/viewers',{cache:'no-store'})
+        .then(r=>r.ok?r.json():null)
+        .then(j=>{
+          if(!j||SYNC.leaving||SYNC.transport!=='relay')return;
+          SYNC.viewers=new Set(j.ids||[]);
+          hostConnectedStatus();
+        }).catch(()=>{});
+    },2500);
+    SYNC.relayTimers.push(t);
+  }else{
+    roomStatus('Подключено · '+channelLabel()+' · ожидание сцены от ведущего…','ready');
+    requestDisplayFullscreen();
+    relayViewerPoll();
+    /* присутствие: отметка раз в 8 с; молчащих сервер забывает сам */
+    const beat=()=>{
+      if(SYNC.leaving||SYNC.transport!=='relay')return;
+      fetch(SYNC.relayBase+'/room/'+SYNC.room+'/viewers/'+SYNC.clientId,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:'{"online":true}'
+      }).catch(()=>{});
+    };
+    beat();
+    SYNC.relayTimers.push(setInterval(beat,8000));
+  }
+  SYNC.reopening=false;
+  SYNC.lastStateTs=Date.now();
+}
+function relayViewerPoll(){
+  if(SYNC.leaving||SYNC.transport!=='relay')return;
+  const ctl=new AbortController();
+  SYNC.pollAbort=ctl;
+  fetch(SYNC.relayBase+'/room/'+SYNC.room+'/state?after='+SYNC.relayTs,{signal:ctl.signal,cache:'no-store'})
+    .then(async r=>{
+      if(SYNC.leaving||SYNC.transport!=='relay')return;
+      if(r.status===204){relayViewerPoll();return;}
+      if(!r.ok)throw new Error('relay '+r.status);
+      const s=await r.json();
+      if(s&&s.ts&&s.data){
+        SYNC.relayTs=s.ts;
+        SYNC.lastStateTs=Date.now();
+        if(SYNC.staleNotified){SYNC.staleNotified=false;roomStatus('Подключено · '+channelLabel()+' · устройство повторяет сцену ведущего.','ready');}
+        applySceneState(s.data);
+        if(!SYNC.liveConfirmed){SYNC.liveConfirmed=true;roomStatus('Подключено · '+channelLabel()+' · устройство повторяет сцену ведущего.','ready');}
+      }
+      relayViewerPoll();
+    })
+    .catch(err=>{
+      if(SYNC.leaving||SYNC.transport!=='relay')return;
+      if(err&&err.name==='AbortError')return;
+      SYNC.pollMisses++;
+      if(SYNC.pollMisses>=4){
+        SYNC.relayFailed=true;
+        roomStatus('Ретранслятор недоступен — переключаемся на резервный канал…');
+        reopenChannel();
+        return;
+      }
+      setTimeout(relayViewerPoll,800);
+    });
+}
+/* Сначала пробуем ретранслятор, затем запасной MQTT-канал. */
+async function openChannel(){
   if(SYNC.leaving)return;
+  const relay=await detectRelay();
+  if(SYNC.leaving)return;
+  if(relay){openRelayChannel(relay);return;}
+  openMqttChannel();
+}
+function openMqttChannel(){
   connectMqtt(client=>{
+    SYNC.transport='mqtt';
     client.on('message',onMqttMessage);
     if(SYNC.role==='host'){
       client.subscribe(roomTopic()+'/viewers/#',{qos:0});
@@ -591,7 +733,7 @@ function openChannel(){
     }else{
       client.subscribe(roomTopic()+'/state',{qos:0});
       publishPresence(true);
-      roomStatus('Подключено · ожидание сцены от ведущего…','ready');
+      roomStatus('Подключено · '+channelLabel()+' · ожидание сцены от ведущего…','ready');
       requestDisplayFullscreen();
     }
     SYNC.reopening=false;
@@ -600,13 +742,22 @@ function openChannel(){
 }
 function closeRoom(silent=false){
   SYNC.leaving=true;SYNC.reopening=false;
+  stopRelayTimers();
+  if(SYNC.transport==='relay'&&SYNC.relayBase&&SYNC.role==='viewer'&&SYNC.room&&SYNC.clientId){
+    /* снять присутствие; при обрыве сервер забудет дисплей сам по таймауту */
+    try{
+      fetch(SYNC.relayBase+'/room/'+SYNC.room+'/viewers/'+SYNC.clientId,{
+        method:'POST',headers:{'Content-Type':'application/json'},body:'{"online":false}'
+      }).catch(()=>{});
+    }catch(err){}
+  }
   if(SYNC.role==='viewer'&&SYNC.room&&SYNC.clientId)publishPresence(false);
   if(SYNC.role==='host'&&SYNC.room&&SYNC.client&&SYNC.client.connected){
     /* стереть «запомненную» сцену, чтобы поздние дисплеи не видели призрак комнаты */
     try{SYNC.client.publish(roomTopic()+'/state','',{qos:0,retain:true});}catch(err){}
   }
   if(SYNC.client){try{SYNC.client.end(false);}catch(err){try{SYNC.client.end(true);}catch(e){}}}
-  SYNC.client=null;SYNC.role=null;SYNC.room='';SYNC.brokerUrl='';
+  SYNC.client=null;SYNC.role=null;SYNC.room='';SYNC.brokerUrl='';SYNC.relayBase='';SYNC.transport='';
   SYNC.viewers.clear();SYNC.lastStateTs=0;SYNC.staleNotified=false;SYNC.liveConfirmed=false;
   $('#roomQr').hidden=true;setRoomUi(false);
   if(!silent)roomStatus('Комната не создана');
@@ -615,7 +766,7 @@ function createRoom(){
   const supportErr=roomSupportError();
   if(supportErr){roomStatus(supportErr,'error');return;}
   closeRoom(true);
-  SYNC.leaving=false;SYNC.reopening=false;
+  SYNC.leaving=false;SYNC.reopening=false;SYNC.relayFailed=false;
   SYNC.role='host';SYNC.room=randomRoomCode();
   SYNC.clientId=ROOM_PREFIX.toLowerCase()+Math.random().toString(16).slice(2,10);
   $('#roomCode').value=SYNC.room;setRoomUi(true);
@@ -628,7 +779,7 @@ function joinRoom(){
   const code=normalizeRoomCode($('#roomCode').value);
   if(code.length<4){roomStatus('Введите код комнаты (6 символов).','error');return;}
   closeRoom(true);
-  SYNC.leaving=false;SYNC.reopening=false;
+  SYNC.leaving=false;SYNC.reopening=false;SYNC.relayFailed=false;
   SYNC.role='viewer';SYNC.room=code;
   SYNC.clientId=ROOM_PREFIX.toLowerCase()+Math.random().toString(16).slice(2,10);
   $('#roomCode').value=code;setRoomUi(true);
